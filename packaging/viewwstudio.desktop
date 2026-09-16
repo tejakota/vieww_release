@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=vieww Studio
+GenericName=UI Code Editor
+Comment=Edit a vieww screen, compile it, and watch it mount beside you
+# Resolved through $PATH so the same file works for a /usr/local install and a
+# per-user one under ~/.local. The %F is what makes "Open With" and a drop onto
+# the launcher icon work — the studio takes paths on argv and, since the file
+# drop was wired, on the window too.
+Exec=viewwstudio %F
+Icon=viewwstudio
+Terminal=false
+Categories=Development;IDE;TextEditor;
+Keywords=rust;vieww;ui;editor;preview;
+StartupNotify=true
+StartupWMClass=viewwstudio
+MimeType=text/x-rust;text/plain;inode/directory;

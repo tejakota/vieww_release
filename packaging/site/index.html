@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download vieww Studio</title>
+<meta name="description" content="A code editor and device-framed preview for vieww screens. Carries its own compiler, so there is nothing to set up but a C toolchain.">
+<meta property="og:title" content="vieww Studio">
+<meta property="og:description" content="Edit a vieww screen on the left, compile it, watch it mount on the right.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2314161A'/%3E%3Crect x='16' y='20' width='40' height='60' rx='8' fill='%23252A33'/%3E%3Crect x='44' y='32' width='40' height='48' rx='8' fill='%235B9DF9'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/*
+	Tokens first, and the complete set on bare `:root`, so the page resolves in
+	the state most viewers are in: no explicit theme chosen, nothing stamped on
+	the root element. The two blocks after it redefine only colours.
+*/
+:root {
+	--ground: #ffffff;
+	--surface: #f5f7fa;
+	--surface-2: #eef1f6;
+	--line: #dde3ec;
+	--ink: #131720;
+	--ink-2: #4a5568;
+	--ink-3: #77839a;
+	--accent: #1f5fd0;
+	--accent-ink: #ffffff;
+	--accent-soft: #e8f0ff;
+	--warn-line: #d8b26a;
+	--warn-soft: #fdf6e6;
+	--shadow: 0 1px 2px rgba(19, 23, 32, .06), 0 8px 24px rgba(19, 23, 32, .06);
+
+	--measure: 66ch;
+	--step: clamp(.9rem, .85rem + .2vw, 1rem);
+	color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--ground: #0e1013;
+		--surface: #14161a;
+		--surface-2: #1a1d23;
+		--line: #262b34;
+		--ink: #e8eaf0;
+		--ink-2: #9aa2b1;
+		--ink-3: #6b7383;
+		--accent: #5b9df9;
+		--accent-ink: #0b0e14;
+		--accent-soft: #16202f;
+		--warn-line: #6a5626;
+		--warn-soft: #1b1811;
+		--shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 10px 30px rgba(0, 0, 0, .35);
+	}
+}
+
+:root[data-theme="dark"] {
+	--ground: #0e1013;
+	--surface: #14161a;
+	--surface-2: #1a1d23;
+	--line: #262b34;
+	--ink: #e8eaf0;
+	--ink-2: #9aa2b1;
+	--ink-3: #6b7383;
+	--accent: #5b9df9;
+	--accent-ink: #0b0e14;
+	--accent-soft: #16202f;
+	--warn-line: #6a5626;
+	--warn-soft: #1b1811;
+	--shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 10px 30px rgba(0, 0, 0, .35);
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	background: var(--ground);
+	color: var(--ink);
+	font: 400 var(--step)/1.6 "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+.page {
+	max-width: 46rem;
+	margin: 0 auto;
+	padding: clamp(2rem, 6vw, 5rem) 1.25rem 5rem;
+	display: flex;
+	flex-direction: column;
+	gap: 3.5rem;
+}
+
+/* ---- the head ------------------------------------------------------- */
+
+.head { display: flex; flex-direction: column; gap: 1.25rem; }
+
+.mark {
+	width: 64px;
+	height: 64px;
+	border-radius: 14px;
+	display: block;
+}
+
+h1 {
+	margin: 0;
+	font-size: clamp(2rem, 1.4rem + 2.6vw, 3rem);
+	font-weight: 600;
+	letter-spacing: -.025em;
+	line-height: 1.05;
+	text-wrap: balance;
+}
+
+.lede {
+	margin: 0;
+	max-width: var(--measure);
+	color: var(--ink-2);
+	font-size: 1.06rem;
+}
+
+/* ---- the download ---------------------------------------------------- */
+
+.get { display: flex; flex-direction: column; gap: .75rem; align-items: flex-start; }
+
+.primary {
+	display: inline-flex;
+	align-items: baseline;
+	gap: .6rem;
+	padding: .85rem 1.4rem;
+	border-radius: 9px;
+	border: 1px solid transparent;
+	background: var(--accent);
+	color: var(--accent-ink);
+	font-weight: 600;
+	font-size: 1.02rem;
+	text-decoration: none;
+	box-shadow: var(--shadow);
+	transition: transform .12s ease, filter .12s ease;
+}
+.primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.primary .size {
+	font: 400 .82rem "IBM Plex Mono", ui-monospace, monospace;
+	opacity: .75;
+}
+
+.detected {
+	color: var(--ink-3);
+	font: 400 .84rem/1.5 "IBM Plex Mono", ui-monospace, monospace;
+}
+.detected a { color: inherit; }
+
+/* ---- sections -------------------------------------------------------- */
+
+section { display: flex; flex-direction: column; gap: 1rem; }
+
+h2 {
+	margin: 0;
+	font-size: .78rem;
+	font-weight: 500;
+	letter-spacing: .13em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+p { margin: 0; max-width: var(--measure); color: var(--ink-2); }
+p strong { color: var(--ink); font-weight: 600; }
+
+a { color: var(--accent); }
+
+/* ---- the requirement note -------------------------------------------- */
+
+.note {
+	border: 1px solid var(--warn-line);
+	background: var(--warn-soft);
+	border-radius: 10px;
+	padding: 1rem 1.15rem;
+	display: flex;
+	flex-direction: column;
+	gap: .5rem;
+}
+.note h3 {
+	margin: 0;
+	font-size: .95rem;
+	font-weight: 600;
+	color: var(--ink);
+}
+.note p { color: var(--ink-2); max-width: none; }
+
+/* ---- code ------------------------------------------------------------ */
+
+.cmds { display: flex; flex-direction: column; gap: .5rem; }
+
+.tabs { display: flex; gap: .35rem; flex-wrap: wrap; }
+.tab {
+	appearance: none;
+	border: 1px solid var(--line);
+	background: var(--surface);
+	color: var(--ink-2);
+	border-radius: 7px;
+	padding: .35rem .75rem;
+	font: 500 .84rem "IBM Plex Mono", ui-monospace, monospace;
+	cursor: pointer;
+}
+.tab[aria-selected="true"] {
+	background: var(--accent-soft);
+	border-color: var(--accent);
+	color: var(--ink);
+}
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+pre {
+	margin: 0;
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	padding: 1rem 1.1rem;
+	overflow-x: auto;
+	font: 400 .86rem/1.7 "IBM Plex Mono", ui-monospace, monospace;
+	color: var(--ink);
+}
+pre .c { color: var(--ink-3); }
+
+/* ---- the table ------------------------------------------------------- */
+
+.assets { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th {
+	font: 500 .74rem "IBM Plex Mono", ui-monospace, monospace;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+	color: var(--ink-3);
+	background: var(--surface-2);
+}
+td.file { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .82rem; }
+td.file a { text-decoration: none; }
+td.file a:hover { text-decoration: underline; }
+
+footer {
+	border-top: 1px solid var(--line);
+	padding-top: 1.5rem;
+	color: var(--ink-3);
+	font-size: .86rem;
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+	justify-content: space-between;
+}
+footer a { color: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) {
+	* { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+	<header class="head">
+		<!--
+			The mark, in the same fractions `ui/brand.rs` and `examples/icon.rs`
+			draw: ground 0.22 radius, editor panel at (.16,.20) 40x60, preview
+			panel at (.44,.32) 40x48. One shape, four places it is drawn.
+		-->
+		<svg class="mark" viewBox="0 0 100 100" role="img" aria-label="vieww Studio">
+			<rect width="100" height="100" rx="22" fill="#14161A"></rect>
+			<rect x="16" y="20" width="40" height="60" rx="8" fill="#252A33"></rect>
+			<rect x="44" y="32" width="40" height="48" rx="8" fill="#5B9DF9"></rect>
+		</svg>
+		<h1>vieww Studio</h1>
+		<p class="lede">
+			A code editor and a device-framed preview, in one window. Edit a screen on
+			the left, press Render, and watch the real widget tree mount on the right —
+			at an iPhone's size, with an iPhone's safe area, on an iPhone's scroll
+			physics.
+		</p>
+	</header>
+
+	<section class="get">
+		<h2>Download</h2>
+		<a class="primary" id="primary" href="https://github.com/__REPO__/releases/latest">
+			<span id="primary-label">Download the latest release</span>
+			<span class="size" id="primary-size"></span>
+		</a>
+		<p class="detected" id="detected">
+			Detecting your platform… <a href="#all">see every download</a>
+		</p>
+	</section>
+
+	<section>
+		<h2>What you need</h2>
+		<div class="note">
+			<h3>A C toolchain, and nothing else</h3>
+			<p>
+				The download carries the <code>rustc</code> it was built with and the
+				<code>vieww</code> libraries it was linked against, so
+				<strong>you do not need Rust installed</strong> — the preview compiles
+				against exactly this build, by construction.
+			</p>
+			<p>
+				What it cannot carry is a linker. A preview is a shared library, and
+				<code>rustc</code> links it through <code>cc</code>: install
+				<code>build-essential</code> on Linux, the Xcode Command Line Tools on
+				macOS, or the MSVC Build Tools on Windows.
+			</p>
+		</div>
+	</section>
+
+	<section class="cmds">
+		<h2>Install</h2>
+		<div class="tabs" role="tablist" aria-label="Install commands by platform">
+			<button class="tab" role="tab" data-os="linux" aria-selected="true">Linux</button>
+			<button class="tab" role="tab" data-os="macos" aria-selected="false">macOS</button>
+			<button class="tab" role="tab" data-os="windows" aria-selected="false">Windows</button>
+		</div>
+
+		<pre data-os="linux"><span class="c"># Debian, Ubuntu — apt pulls in the C toolchain for you</span>
+curl -LO https://github.com/__REPO__/releases/latest/download/viewwstudio-linux-x86_64.deb
+sudo apt install ./viewwstudio-linux-x86_64.deb
+
+<span class="c"># anything else: one file, no install step</span>
+curl -LO https://github.com/__REPO__/releases/latest/download/viewwstudio-linux-x86_64.AppImage
+chmod +x viewwstudio-linux-x86_64.AppImage &amp;&amp; ./viewwstudio-linux-x86_64.AppImage</pre>
+
+		<pre data-os="macos" hidden><span class="c"># open the .dmg and drag vieww Studio to Applications, then:</span>
+xcode-select --install          <span class="c"># the linker, once per machine</span>
+
+<span class="c"># unsigned, so the first launch needs a right-click → Open,</span>
+<span class="c"># or, if Gatekeeper has already quarantined it:</span>
+xattr -dr com.apple.quarantine "/Applications/vieww Studio.app"</pre>
+
+		<pre data-os="windows" hidden><span class="c"># run the .msi, then install the linker once:</span>
+winget install Microsoft.VisualStudio.2022.BuildTools ^
+  --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools"
+
+<span class="c"># SmartScreen will warn until the installer is signed:</span>
+<span class="c"># More info → Run anyway</span></pre>
+	</section>
+
+	<section id="all">
+		<h2>Every download</h2>
+		<p>
+			Each file is around 400&nbsp;MB, because the compiler and the libraries are
+			inside it. Checksums for all of them are in
+			<a href="https://github.com/__REPO__/releases/latest/download/SHA256SUMS">SHA256SUMS</a>.
+		</p>
+		<div class="assets">
+			<table>
+				<thead>
+					<tr><th>Platform</th><th>File</th></tr>
+				</thead>
+				<tbody id="asset-rows"></tbody>
+			</table>
+		</div>
+	</section>
+
+	<footer>
+		<span id="version">Latest release</span>
+		<span>
+			<a href="https://github.com/__REPO__">Source</a> ·
+			<a href="https://github.com/__REPO__/releases">All releases</a> ·
+			<a href="https://github.com/__REPO__/issues">Issues</a>
+		</span>
+	</footer>
+
+</main>
+
+<script>
+(function () {
+	"use strict";
+
+	// `releases/latest/download/<name>` resolves only because every release
+	// names its assets identically — see the header of `release.yml`.
+	var BASE = "https://github.com/__REPO__/releases/latest/download/";
+
+	var ASSETS = [
+		{ os: "linux",   label: "Debian, Ubuntu",       file: "viewwstudio-linux-x86_64.deb" },
+		{ os: "linux",   label: "Other Linux",          file: "viewwstudio-linux-x86_64.AppImage" },
+		{ os: "linux",   label: "Linux archive",        file: "viewwstudio-linux-x86_64.tar.gz" },
+		{ os: "macos",   label: "macOS · Apple silicon", file: "viewwstudio-macos-aarch64.dmg", arch: "arm" },
+		{ os: "macos",   label: "macOS · Intel",        file: "viewwstudio-macos-x86_64.dmg", arch: "x86" },
+		{ os: "windows", label: "Windows",              file: "viewwstudio-windows-x86_64.msi" },
+		{ os: "windows", label: "Windows archive",      file: "viewwstudio-windows-x86_64.zip" }
+	];
+
+	var rows = document.getElementById("asset-rows");
+	ASSETS.forEach(function (asset) {
+		var tr = document.createElement("tr");
+		var platform = document.createElement("td");
+		platform.textContent = asset.label;
+		var file = document.createElement("td");
+		file.className = "file";
+		var link = document.createElement("a");
+		link.href = BASE + asset.file;
+		link.textContent = asset.file;
+		file.appendChild(link);
+		tr.appendChild(platform);
+		tr.appendChild(file);
+		rows.appendChild(tr);
+	});
+
+	// Which download to put under the big button. A guess, always overridable:
+	// the table below it is the whole list, and the line under the button says
+	// what was guessed and links straight to it.
+	function detect() {
+		var ua = navigator.userAgent;
+		var platform = (navigator.userAgentData && navigator.userAgentData.platform) || ua;
+		if (/Win/i.test(platform)) return { os: "windows" };
+		if (/Mac|iP(hone|ad)/i.test(platform)) {
+			// Apple silicon does not say so in the user agent. The one thing
+			// that separates them in a browser is that Rosetta-era Intel Macs
+			// cannot report more than 8 GPU-backed cores under WebGL, so this
+			// asks the honest question instead and defaults to arm, which is
+			// every Mac sold since 2020.
+			return { os: "macos", arch: /Intel/i.test(ua) && navigator.maxTouchPoints === 0 && !/arm/i.test(ua) ? "unknown" : "arm" };
+		}
+		if (/Linux|X11|Ubuntu|Debian/i.test(platform)) return { os: "linux" };
+		return null;
+	}
+
+	var found = detect();
+	var button = document.getElementById("primary");
+	var label = document.getElementById("primary-label");
+	var detected = document.getElementById("detected");
+
+	if (found) {
+		var pick = ASSETS.filter(function (asset) {
+			return asset.os === found.os && (!asset.arch || asset.arch === found.arch);
+		})[0] || ASSETS.filter(function (asset) { return asset.os === found.os; })[0];
+
+		var names = { linux: "Linux", macos: "macOS", windows: "Windows" };
+		button.href = BASE + pick.file;
+		label.textContent = "Download for " + names[found.os];
+		detected.innerHTML = "";
+		detected.appendChild(document.createTextNode(pick.file + " · "));
+		var all = document.createElement("a");
+		all.href = "#all";
+		all.textContent = "not your platform?";
+		detected.appendChild(all);
+
+		// macOS is two downloads and the browser will not say which; ask rather
+		// than guess wrong, since the wrong one refuses at first launch with a
+		// host-mismatch message instead of running slowly.
+		if (found.os === "macos" && found.arch === "unknown") {
+			label.textContent = "Download for macOS";
+			detected.insertBefore(
+				document.createTextNode("Apple silicon or Intel? Pick from the list — "),
+				detected.firstChild
+			);
+		}
+	} else {
+		detected.textContent = "Pick your platform from the list below.";
+	}
+
+	// The tabs.
+	var tabs = [].slice.call(document.querySelectorAll(".tab"));
+	var blocks = [].slice.call(document.querySelectorAll("pre[data-os]"));
+	function show(os) {
+		tabs.forEach(function (tab) {
+			tab.setAttribute("aria-selected", String(tab.dataset.os === os));
+		});
+		blocks.forEach(function (block) {
+			block.hidden = block.dataset.os !== os;
+		});
+	}
+	tabs.forEach(function (tab) {
+		tab.addEventListener("click", function () { show(tab.dataset.os); });
+	});
+	if (found) show(found.os);
+
+	// The version, when the page is served from somewhere that can reach the
+	// API. It is decoration: every link above is a `latest/download` URL and
+	// works whether or not this succeeds.
+	try {
+		fetch("https://api.github.com/repos/__REPO__/releases/latest", {
+			headers: { Accept: "application/vnd.github+json" }
+		})
+			.then(function (response) { return response.ok ? response.json() : null; })
+			.then(function (release) {
+				if (!release || !release.tag_name) return;
+				document.getElementById("version").textContent = "Latest release " + release.tag_name;
+				var sizes = {};
+				(release.assets || []).forEach(function (asset) { sizes[asset.name] = asset.size; });
+				var mine = button.href.split("/").pop();
+				if (sizes[mine]) {
+					document.getElementById("primary-size").textContent =
+						Math.round(sizes[mine] / 1048576) + " MB";
+				}
+			})
+			.catch(function () {});
+	} catch (error) {
+		/* no network, no version line — the downloads still work */
+	}
+})();
+</script>
+</body>
+</html>

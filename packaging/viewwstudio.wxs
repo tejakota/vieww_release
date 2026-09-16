@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+	The Windows installer.
+
+	# Why WiX 4+ and not the older toolset
+
+	The payload is a bundled Rust sysroot: roughly ten thousand files whose
+	layout is the compiler's business and changes with it. The v3 answer was
+	`heat.exe`, which harvests that tree into generated authoring that has to be
+	regenerated — and silently ships a stale file list when nobody remembers.
+	The `<Files Include="...\**"/>` element below is the whole file manifest,
+	resolved at build time from what is actually on disk.
+
+	# What it installs, and where
+
+	    C:\Program Files\vieww Studio\
+	      bin\viewwstudio.exe
+	      lib\vieww\...            the rlibs, the deps, the toolchain, the manifest
+
+	`install::target_dir` looks for `lib\vieww` beside and one level above the
+	executable, so this layout needs no environment variable and no launcher
+	script — which matters, because a launcher script is a second place the SDK
+	path would be written down.
+
+	# What it does not do
+
+	No Authenticode signature: a certificate cannot live in a repository, and an
+	installer that claims to be signed and is not is worse than one that says
+	plainly that it is not. SmartScreen will warn until `release.yml` is given
+	credentials at the step marked for them.
+
+	Built by `packaging/package.sh --msi`, which passes:
+
+	    -d Version=<workspace version>   -d Payload=<the staged tree>
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Package
+		Name="vieww Studio"
+		Manufacturer="vieww"
+		Version="$(Version)"
+		UpgradeCode="8f2a6d31-4a1e-4f6b-9c2b-1d0c7b5a9e44"
+		Scope="perMachine"
+		Compressed="yes">
+
+		<!--
+			Upgrades replace rather than accumulate. Without this every version
+			installs beside the last one, and a machine ends up with three
+			studios and three SDKs of 900 MB each.
+		-->
+		<MajorUpgrade
+			AllowSameVersionUpgrades="yes"
+			DowngradeErrorMessage="A newer vieww Studio is already installed." />
+
+		<MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+		<StandardDirectory Id="ProgramFiles64Folder">
+			<Directory Id="INSTALLFOLDER" Name="vieww Studio">
+				<!--
+					Everything the packaging script staged, verbatim. The
+					subdirectory structure of the payload is preserved, which is
+					what puts `lib\vieww` where the studio looks for it.
+				-->
+				<Files Include="$(Payload)\**" />
+			</Directory>
+		</StandardDirectory>
+
+		<!-- The Start menu entry, and the only shortcut: a desktop icon nobody
+		     asked for is the thing people uninstall software over. -->
+		<StandardDirectory Id="ProgramMenuFolder">
+			<Component Id="StartMenuShortcut" Guid="*">
+				<Shortcut
+					Id="StudioShortcut"
+					Name="vieww Studio"
+					Description="A code editor and device-framed preview for vieww screens"
+					Target="[INSTALLFOLDER]bin\viewwstudio.exe"
+					WorkingDirectory="INSTALLFOLDER" />
+				<RemoveFolder Id="RemoveProgramMenuFolder" On="uninstall" />
+				<RegistryValue
+					Root="HKCU"
+					Key="Software\vieww\Studio"
+					Name="installed"
+					Type="integer"
+					Value="1"
+					KeyPath="yes" />
+			</Component>
+		</StandardDirectory>
+
+		<Feature Id="Main" Title="vieww Studio" Level="1">
+			<ComponentGroupRef Id="Files" />
+			<ComponentRef Id="StartMenuShortcut" />
+		</Feature>
+	</Package>
+</Wix>

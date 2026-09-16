@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>vieww Studio</string>
+	<key>CFBundleDisplayName</key>
+	<string>vieww Studio</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.vieww.studio</string>
+	<key>CFBundleExecutable</key>
+	<string>viewwstudio</string>
+	<key>CFBundleIconFile</key>
+	<string>viewwstudio</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- Both are rewritten by package.sh from the crate version, so there is
+	     one place a version number lives and it is Cargo.toml. -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<!-- The studio draws its own chrome and expects to be told the real
+	     backing scale; without this it is upscaled from 1x and every glyph is
+	     soft on a Retina display. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Rust Source</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.source-code</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
