@@ -1,0 +1,45 @@
+# Workspace cargo configuration.
+#
+# **This file must ship with the source.** The September 2026 archive did not
+# contain it (a `.cargo/` directory is a common thing for a packager or a
+# `.gitignore` to drop), and without it `viewwstudio`'s `tests/pipeline.rs`
+# aborts the whole `cargo test --workspace` run with "Rust cannot catch foreign
+# exceptions" — see `ci/check/checks.sh`'s preflight, which describes exactly that
+# failure. `ci/check/release-clean-check.sh` now fails a tree without it.
+#
+# Reconstructed from the contract the repository's own scripts document:
+# `Cargo.toml` (the prefer-dynamic rationale), `ci/check/checks.sh` (the host block,
+# verbatim), `ci/mobile/ndk-clang.sh` + its two shims (Android linkers),
+# `ci/mobile/adb-runner.sh` and `ci/mobile/simctl-runner.sh` (runners). If the original file
+# carried anything beyond these, restore it from the machine it came from.
+
+# ── Desktop hosts: one shared dynamic `std` ─────────────────────────────────
+#
+# vieww Studio `dlopen`s preview cdylibs. Both sides must link `libstd-*.so`
+# from the same toolchain or a guest panic is a foreign exception to the host's
+# `catch_unwind`. `rpath` lets a binary find that `libstd` when something other
+# than cargo starts it. Not for MSVC, which ships no dynamic std
+# (`ci/check/platform-check.sh`), and not for mobile, where it is a link error.
+#
+# Note: exporting `RUSTFLAGS` at all replaces these blocks wholesale. The
+# certification runs `examples/vieww-standard` that way on purpose, so its
+# counting `#[global_allocator]` is honoured — see that example's
+# `counting.rs`.
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))']
+rustflags = ["-C", "prefer-dynamic", "-C", "rpath"]
+
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "prefer-dynamic", "-C", "rpath"]
+
+# ── Android: NDK clang through the shims, tests on a device through adb ─────
+[target.aarch64-linux-android]
+linker = "ci/mobile/ndk-clang-aarch64.sh"
+runner = "ci/mobile/adb-runner.sh"
+
+[target.x86_64-linux-android]
+linker = "ci/mobile/ndk-clang-x86_64.sh"
+runner = "ci/mobile/adb-runner.sh"
+
+# ── iOS simulator: tests inside `xcrun simctl spawn` ────────────────────────
+[target.aarch64-apple-ios-sim]
+runner = "ci/mobile/simctl-runner.sh"

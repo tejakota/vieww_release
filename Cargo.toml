@@ -1,0 +1,373 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vieww-foundation",
+    "crates/vieww-widget",
+    "crates/vieww-element",
+    "crates/vieww-paint",
+    "crates/vieww-hal",
+    "crates/vieww-text",
+    "crates/vieww-animation",
+    "crates/vieww-asset",
+    "crates/vieww-gestures",
+    "crates/vieww-render",
+    "crates/vieww-scene",
+    "crates/vieww-render-graph",
+    "crates/vieww-render-planner",
+    "crates/vieww-runtime",
+    "crates/vieww-gpu",
+    "crates/vieww-shaders",
+    "crates/vieww-reload",
+    "crates/vieww-platform",
+    "crates/vieww-platform-winit",
+    "crates/vieww-platform-web",
+    "crates/vieww-platform-web-dom",
+    "crates/vieww-hardware",
+    "crates/vieww-effects",
+    "crates/vieww-devtools",
+    "crates/vieww",
+    "crates/vieww-say-codegen",
+    "crates/vieww-test-harness",
+    "crates/vieww-image",
+    "crates/vieww-interaction",
+    "crates/vieww-scroll",
+    "crates/vieww-accessibility",
+    "crates/vieww-plugin",
+    "crates/vieww-plugin-macros",
+    "crates/vieww-widget-macros",
+    "crates/vieww-build",
+    "crates/vieww-cli",
+    "examples/guide-counter",
+    "examples/reload-guest",
+    "examples/reload-host",
+    "examples/reload-android",
+    "examples/screenshot",
+    "examples/shot-diff",
+    "examples/test-gpu-work",
+    "examples/test-premium-ui",
+    "examples/test-text-fidelity",
+    "examples/test-image-effects",
+    "examples/test-layout-stress",
+    "examples/test-animation-stress",
+    "examples/test-scroll-stress",
+    "examples/test-native-surface",
+    "examples/test-web",
+    "examples/vieww-standard",
+    "examples/vector-probe",
+    "examples/animation-showcase",
+    "examples/full-showcase",
+    "examples/audit-sheets",
+    "examples/editor",
+    "examples/fixtures",
+    "examples/features/*",
+    "apps/viewwstudio",
+    "apps/viewwsite"
+]
+
+[workspace.package]
+# 0.1.0, up from 0.0.1, and the difference is a claim rather than a counter.
+#
+# 0.0.x says "this is a placeholder"; it is what a workspace carries while it
+# is deciding what it is. This one has decided: the layering is settled and
+# enforced by the dependency graph, the widget catalogue is stable enough that
+# `#[widget]` could be added without touching a single widget, and
+# `TRACKER.md` can say crate by crate what is tested and what is not.
+#
+# 0.1.0 is emphatically **not** a promise of stability — semver's rules for
+# 0.x mean a minor bump may break anything, and it will. It is a promise that
+# the thing has a shape worth depending on and a changelog worth reading.
+#
+# What it is not a claim about: cross-platform GPU completeness (the Vulkan
+# SceneRenderer is real but still has explicit offscreen-compositor gaps — see
+# `vieww_gpu::ScenePlan::is_complete`),
+# platforms other than Linux (real code, never built on their own toolchains),
+# and the web backend (never compiled at all, and `publish = false` for
+# exactly that reason).
+version = "0.1.0"
+edition = "2021"
+# **1.89, because that is what the dependency tree actually requires.**
+#
+# This said 1.85 and it was not true. `cargo check` on 1.85 refuses outright:
+#
+#     cosmic-text@0.19.0 requires rustc 1.89
+#     smol_str@0.3.6     requires rustc 1.89
+#     image@0.25.10      requires rustc 1.88.0
+#     naga@29.0.4        requires rustc 1.87
+#     zbus/zvariant/…    requires rustc 1.87
+#
+# `cosmic-text` is the text stack — not optional, not a dev-dependency, not
+# behind a feature. So no consumer has ever been able to build this workspace on
+# 1.85, and `rust-version` was telling crates.io otherwise. An unverified MSRV is
+# the same class of mistake as the `repository` field this file already declines
+# to guess at: a wrong value is worse than no value, because someone believes it.
+#
+# The number is the maximum over the whole tree, so it moves when a dependency's
+# does. `ci/check/checks.sh` reads it from here and `.github/workflows/ci.yml` installs
+# whatever it reads — neither hard-codes a version any more, so the three cannot
+# drift apart again.
+#
+# **Lowering it is real work, not a smaller number.** It means pinning
+# `cosmic-text`, `image` and `naga` back to releases that predate their bumps,
+# and living on those. Worth doing only if someone actually needs 1.85; nobody
+# has asked, and until they do this is the honest figure.
+rust-version = "1.89"
+license = "Apache-2.0"
+# `repository` is deliberately absent, decided 2026-08-17. It pointed at
+# `https://github.com/teja/vieww`, which 404s, and this checkout has no remote —
+# so publishing would have put a dead link on twelve crate pages. crates.io does
+# not verify the field, which is exactly why an unverified wrong value is worse
+# than no value: a reader who clicks it learns the project is abandoned.
+#
+# **To restore it**, add the line back here and `repository.workspace = true` to
+# each of the fifteen member manifests. Inheriting a key the workspace does not
+# define is a hard error, so the two halves move together or not at all.
+# Resolved against the workspace root when inherited, so all twelve crates put
+# the same front page on crates.io rather than each carrying a copy.
+readme = "README.md"
+# crates.io takes at most five keywords and two of these are the words somebody
+# would actually search. The five slots go to the words a UI-framework seeker
+# actually types, and the list stays honest — this is not a port of anything.
+keywords = ["ui", "gui", "framework", "mobile"]
+# Both are real crates.io slugs; an invalid one is refused at publish time, and
+# the point of writing them now is that the first publish is not the first time
+# any of this is checked.
+categories = ["gui", "rendering"]
+
+[workspace.dependencies]
+vieww = { path = "crates/vieww", version = "0.1.0" }
+vieww-foundation = { path = "crates/vieww-foundation", version = "0.1.0" }
+vieww-widget = { path = "crates/vieww-widget", version = "0.1.0" }
+vieww-element = { path = "crates/vieww-element", version = "0.1.0" }
+vieww-paint = { path = "crates/vieww-paint", version = "0.1.0" }
+vieww-hal = { path = "crates/vieww-hal", version = "0.1.0" }
+vieww-text = { path = "crates/vieww-text", version = "0.1.0" }
+vieww-animation = { path = "crates/vieww-animation", version = "0.1.0" }
+vieww-asset = { path = "crates/vieww-asset", version = "0.1.0" }
+vieww-gestures = { path = "crates/vieww-gestures", version = "0.1.0" }
+vieww-render = { path = "crates/vieww-render", version = "0.1.0" }
+vieww-reload = { path = "crates/vieww-reload", version = "0.1.0" }
+vieww-platform = { path = "crates/vieww-platform", version = "0.1.0" }
+vieww-platform-winit = { path = "crates/vieww-platform-winit", version = "0.1.0" }
+vieww-platform-web = { path = "crates/vieww-platform-web", version = "0.1.0" }
+vieww-platform-web-dom = { path = "crates/vieww-platform-web-dom", version = "0.1.0" }
+vieww-hardware = { path = "crates/vieww-hardware", version = "0.1.0" }
+vieww-effects = { path = "crates/vieww-effects", version = "0.1.0" }
+vieww-devtools = { path = "crates/vieww-devtools", version = "0.1.0" }
+vieww-test-harness = { path = "crates/vieww-test-harness", version = "0.1.0" }
+vieww-say-codegen = { path = "crates/vieww-say-codegen", version = "0.1.0" }
+vieww-scene = { path = "crates/vieww-scene", version = "0.1.0" }
+vieww-render-graph = { path = "crates/vieww-render-graph", version = "0.1.0" }
+vieww-render-planner = { path = "crates/vieww-render-planner", version = "0.1.0" }
+vieww-runtime = { path = "crates/vieww-runtime", version = "0.1.0" }
+vieww-gpu = { path = "crates/vieww-gpu", version = "0.1.0" }
+vieww-shaders = { path = "crates/vieww-shaders", version = "0.1.0" }
+vieww-image = { path = "crates/vieww-image", version = "0.1.0" }
+vieww-interaction = { path = "crates/vieww-interaction", version = "0.1.0" }
+vieww-scroll = { path = "crates/vieww-scroll", version = "0.1.0" }
+vieww-accessibility = { path = "crates/vieww-accessibility", version = "0.1.0" }
+vieww-plugin = { path = "crates/vieww-plugin", version = "0.1.0" }
+vieww-plugin-macros = { path = "crates/vieww-plugin-macros", version = "0.1.0" }
+vieww-widget-macros = { path = "crates/vieww-widget-macros", version = "0.1.0" }
+vieww-build = { path = "crates/vieww-build", version = "0.1.0" }
+vieww-cli = { path = "crates/vieww-cli", version = "0.1.0" }
+
+# Touch exploration on Android needs a winit that does not throw hover events
+# away. `ci/tools/patch-winit.sh` vendors and patches one; uncommenting this is what
+# makes the build use it.
+#
+# **Left commented on purpose.** A `[patch.crates-io]` rewires every build in
+# this workspace including CI's, and a local deviation that nobody remembers
+# making is exactly how a green run stops meaning what it says. Uncomment it,
+# check by finger, and comment it back out — or delete both halves the day
+# upstream takes the patch.
+#
+# [patch.crates-io]
+# winit = { path = "vendor/winit" }
+
+# A phone runs whatever profile the harness built. There was no `[profile]`
+# section here at all, so both profiles were cargo's defaults and nothing in the
+# tree recorded that the difference matters on a device — a debug build is the
+# first thing to rule out when a phone reports lag, and it is worth roughly an
+# order of magnitude.
+#
+# `panic` is deliberately left at the default `unwind`. **Do not set
+# `panic = "abort"` here.** `ElementTree::build` wraps every `widget.build` in
+# `catch_unwind` — that is the error boundary, and `deep_links.rs` notes its own
+# `catch_unwind` as load-bearing. Aborting turns a contained widget failure into
+# a killed process, which on a phone is a crash report instead of a red box.
+[profile.release]
+# One codegen unit per crate rather than sixteen. The cost is compile time on a
+# cold build, paid once by CI and by whoever ships; the win lands on the device,
+# where the frame budget is 16.6ms.
+codegen-units = 1
+
+# **LTO is off, and it is not an oversight — it cannot be on.**
+#
+# `rustc` refuses outright:
+#
+#     error: cannot prefer dynamic linking when performing LTO
+#
+# and `-C prefer-dynamic` is not optional here. It is what makes the studio and
+# the preview `cdylib` it `dlopen`s share one `libstd`, which is what makes
+# `catch_unwind` catch a panic raised inside somebody's screen instead of the
+# process aborting — see `.cargo/config.toml`, which has the whole argument.
+#
+# So the two are a genuine either/or, and this is the side to be on: LTO is
+# worth low single-digit percentages on frame cost, and the panic boundary is
+# the difference between a red box in the preview pane and the window vanishing
+# while somebody is working. `codegen-units = 1` still buys most of what LTO
+# would inside each crate; what is given up is cross-crate inlining.
+#
+# Setting this to anything but `false` makes every release build fail to link,
+# so the mistake is at least loud.
+lto = false
+
+# Line tables, not full debug info. A release profile with no debug info at all
+# gives a device profile that is a wall of hex, and the work still ahead here is
+# exactly the kind that needs to read one — the previous phone report resolved
+# to per-frame CPU in layout and build, not to the GPU. Line tables are a few
+# percent of binary size; full `debug = true` is multiples of it.
+debug = "line-tables-only"
+
+# Debug builds are painful mostly because the per-frame pixel work is
+# unoptimised, and none of it is code anyone steps through. Optimising just
+# that keeps the crates people actually debug — widgets, elements, the studio's
+# own logic — fast to compile and readable in a debugger, while making a debug
+# build merely slow rather than unusable.
+#
+# This does not make a debug build shippable. It makes one survivable.
+#
+# `"*"` covers every **non-workspace** dependency: the text stack, `png`,
+# `ttf-parser`, winit.
+[profile.dev.package."*"]
+opt-level = 2
+
+# **The rasterizer is ours now, and `"*"` above does not cover it.**
+#
+# That rule was written when the heavy per-frame work belonged to vello and
+# wgpu — third-party crates, so `"*"` reached them. Both were removed:
+# `vieww-paint`'s own scanline rasterizer is the renderer (see
+# `docs/RENDERER-MIGRATION.md`), and it is a workspace member, so `"*"` skips
+# it. Every debug build since has run the single hottest loop in the framework
+# — coverage, blending, one pass per pixel of the window — with no
+# optimisation at all.
+#
+# What that costs is not subtle and it is not theoretical: an unoptimised
+# `NativeRenderer` turns a frame that takes single-digit milliseconds into one
+# that takes seconds, which is a studio where clicking a sidebar icon appears
+# to hang, an animation that plays two of its frames, and a splash screen that
+# never fades. All three were reported from a debug build of `viewwstudio`, and
+# all three are this line.
+#
+# Only the pixel-facing crates, deliberately. `vieww-widget`, `vieww-element`
+# and the studio itself stay unoptimised, because those are where a breakpoint
+# actually goes and where an inlined stack frame actually costs someone time.
+[profile.dev.package.vieww-paint]
+opt-level = 3
+[profile.dev.package.vieww-text]
+opt-level = 3
+[profile.dev.package.vieww-effects]
+opt-level = 3
+[profile.dev.package.vieww-foundation]
+# Geometry, colour and `Transform` — small functions called from inside the
+# rasterizer's inner loops, where "not inlined" is the whole cost.
+opt-level = 3
+[profile.dev.package.vieww-scene]
+opt-level = 2
+[profile.dev.package.vieww-hal]
+opt-level = 2
+
+# **Share one `libstd` between the studio and the previews it loads.**
+#
+# `apps/viewwstudio` `dlopen`s a `cdylib` the preview compiles, then calls into
+# widgets the cdylib produced. A `cdylib` statically links its own copy of
+# `std`, so a panic raised inside guest code is a *foreign* exception to the
+# host's unwinder — `catch_unwind` in the host does not catch it, and the
+# process aborts with "fatal runtime error: Rust cannot catch foreign
+# exceptions". See `apps/viewwstudio/src/loaded.rs`'s panic section for the
+# full history.
+#
+# `panic = "unwind"` (preserved below) and `catch_unwind` in
+# `ElementTree::build` are the host-side boundary; with both sides built
+# `prefer-dynamic`, both link against `libstd-*.so` from the same toolchain,
+# and the existing catch works for guest widgets too.
+#
+# **The cost:** a binary that depends on `libstd-*.so` being on the loader
+# path at runtime. For a development checkout this is the toolchain's own
+# `lib/` directory, which is already on `LD_LIBRARY_PATH` for `cargo run`.
+# For a packaged studio, the packager has to ship `libstd.so` alongside the
+# binary — see `packaging/package.sh`. A binary that does not find its
+# `libstd` exits with a loader error rather than a missing-widget error, so
+# a wrong package fails loud and early rather than silently.
+#
+# **Where this flag goes:** `prefer-dynamic` is a rustc `-C` flag, not a cargo
+# profile key — cargo ignores `prefer-dynamic` under `[profile.*]` with only an
+# "unused manifest key" warning. It has to be set as a rustflag, so it lives in
+# `.cargo/config.toml`, scoped to the desktop triples the studio runs on (a
+# plain `[build] rustflags` would reach an Android or iOS cross-build too, where
+# a dynamic libstd is a link error against a file the NDK does not ship). It
+# applies to dev and release both — the panic boundary has to hold on a release
+# build too, since a release studio loading a release preview is what a packaged
+# application runs. That file also carries the `-C rpath` that lets a binary
+# find its `libstd` when it was started by anything other than cargo.
+
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+doc_markdown = "allow"
+
+# Broken in clippy 0.1.96 (rustc 1.96.1): it fires on initializers that are
+# *already* `const`, so it asks for the thing that is written on the line it
+# points at. Every `thread_local!` in this workspace that can be `const` already
+# is — `frame.rs`, `sliver_refresh.rs`, `app.rs`, `gallery.rs` — and the one that
+# cannot, `theme.rs`'s `Rc::new(ThemeData::light())`, is correctly left alone.
+#
+# Allowed workspace-wide rather than at the four sites because a lint that no
+# edit can satisfy carries no signal anywhere, and four `#[allow]`s would each
+# have to repeat this paragraph. **Delete this the next time the toolchain moves**
+# and let the four sites prove the lint is honest again.
+missing_const_for_thread_local = "allow"
+
+# ── Lints the corrected MSRV switched on ──────────────────────────────────
+#
+# Clippy gates a lint on `rust-version`: it will not tell you to use an API your
+# declared minimum cannot compile. While this workspace claimed 1.85 — a figure
+# nothing could build on, see the note in `[workspace.package]` — every lint that
+# suggests a 1.86-to-1.89 API was suppressed everywhere, silently. Correcting the
+# figure to 1.89 turned all of them on at once.
+#
+# They are real suggestions, not false positives, and none of them changes
+# behaviour. They are allowed here rather than applied because each is a *mass*
+# edit to code that is worth reading carefully, and doing several of those in the
+# same change as an MSRV correction is how a real defect hides in the diff.
+#
+# **Each is its own change, with the test suite as the check, and each entry
+# below is deleted when its last call site is gone.**
+
+# `slice::as_chunks`, stabilised in 1.88. **Seventeen** call sites, every one a
+# per-pixel loop: `vieww-effects`' blend and matrix passes, `vieww-paint`'s
+# target readback, `vieww-image`'s atlas and mipmap chains, `vieww-hal`'s
+# swapchain copy.
+#
+# The rewrite is not the substitution the lint's `help` line offers.
+# `as_chunks_mut::<4>()` returns a `(&mut [[u8; 4]], &mut [u8])` pair, so a
+# `.zip()` over two of them changes shape as well as type, and the remainder
+# slice becomes something the loop must use or explicitly discard. Seventeen of
+# those, at once, in the code that writes every pixel this framework draws, on
+# the strength of a style lint — that is how a subtle blend bug gets in. Do them
+# against the parity and retained-repaint suites.
+chunks_exact_to_as_chunks = "allow"
+
+# `u*::is_multiple_of`, stabilised in 1.87 for unsigned integers. **Thirty-nine**
+# `% n == 0` sites, spread across `vieww-foundation`'s leap-year rule and blur
+# kernel sizing, `vieww-paint`'s dash phase, the studio's image budget, and a
+# long tail of `index % 2 == 0` row striping in tests and gallery examples.
+#
+# `.is_multiple_of(n)` reads better than `% n == 0` and this list should shrink
+# to nothing. It is one mechanical pass — but only over the *unsigned* sites,
+# because the method does not exist for signed integers, and telling those apart
+# is per-site work rather than a search and replace.
+manual_is_multiple_of = "allow"

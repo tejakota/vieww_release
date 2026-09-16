@@ -1,0 +1,199 @@
+# cargo-deny: what the dependency tree is allowed to contain.
+#
+# The workspace is fifteen first-party crates and a few hundred transitive ones —
+# wgpu, vello, cosmic-text, winit and AccessKit each bring a tree of their own.
+# "This project is Apache-2.0" is a claim about all of them, and nothing was
+# checking it. The advisory half matters for a different reason: a security
+# advisory against a dependency does not break a build, so with no gate the first
+# anyone hears of one is a report from a user.
+#
+# Run locally with `cargo deny check all`; `ci/check/checks.sh` and the `deny` CI job
+# both do.
+
+[graph]
+# Every target the project actually ships to. Restricting the graph keeps the
+# check honest in both directions: a Windows-only dependency's licence still has
+# to be acceptable, and a licence problem in a target nobody builds is not a
+# reason to fail a pull request.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
+all-features = false
+
+# ------------------------------------------------------------------ advisories
+
+[advisories]
+# `deny` for both, rather than `warn`: a gate that warns is a gate that is
+# ignored, and the whole reason this file exists is that nothing was failing.
+yanked = "deny"
+# Advisories with no fix available are the case that needs a decision rather than
+# a policy. Each one goes in this list with a dated note saying why it is
+# tolerated and what would change that — an empty list with a comment is more
+# honest than a blanket allow.
+# **Deliberately empty, and RUSTSEC-2024-0436 is why it stays that way.**
+#
+# `paste` (unmaintained, archived upstream) failed this check for as long as
+# the CI job passed `--all-features` — the default for
+# `EmbarkStudios/cargo-deny-action`, which beats `[graph] all-features = false`
+# below. That resolved Vulkan and Metal and D3D12 and Android and the web at
+# once: a build nobody ships. `paste`'s only parent is `metal`, which
+# `vieww-hal` declares under `[target.'cfg(target_os = "macos")'.dependencies]`
+# behind an off-by-default feature.
+#
+# With `arguments: --workspace` in `.github/workflows/ci.yml`, cargo-deny
+# resolves the real graph and reports `no crate matched advisory criteria` for
+# that ID — the crate is not there. An `ignore` entry for an advisory that
+# cannot fire is worse than none: it is a standing exemption for a crate that
+# might come back through a different path later, and nobody would notice.
+#
+# So: fix the graph, not the exemption list. If an advisory does fire here,
+# each entry goes in this list with a dated note saying why it is tolerated and
+# what would change that.
+ignore = [
+    # **RUSTSEC-2026-0192 — `ttf-parser` is unmaintained, and this workspace
+    # cannot stop depending on it.**
+    #
+    # Not a vulnerability. The author has said the crate will not receive
+    # further fixes (harfbuzz/ttf-parser#217) and the advisory is explicit that
+    # there is no safe upgrade: "Solution: No safe upgrade is available!" The
+    # named alternative is `skrifa`.
+    #
+    # It is a direct dependency here — `vieww-text` unconditionally, and
+    # `vieww-paint` behind `native`, which is the only renderer this framework
+    # has. So this is first-party, not something inherited by accident.
+    #
+    # **Porting the first-party uses would not clear it.** `ttf-parser` also
+    # arrives twice by paths this repository does not control:
+    #
+    #     ttf-parser <- fontdb           <- cosmic-text <- vieww-text
+    #     ttf-parser <- owned_ttf_parser <- ab_glyph <- sctk-adwaita <- winit
+    #
+    # The second is winit's Wayland client-side decorations. Both would keep
+    # this advisory firing after a complete migration of our own code, which is
+    # what makes an `ignore` the honest answer rather than a deferral: there is
+    # no work available here that removes it. It clears when cosmic-text drops
+    # fontdb and winit drops ab_glyph, and not before.
+    #
+    # **This is not an argument against the port.** `skrifa` 0.44 is already in
+    # the graph (cosmic-text and swash both use it), so moving `vieww-paint`'s
+    # glyph outlines onto it adds no dependency and removes a second font
+    # parser from the binary — see TRACKER.md, and note the open question about
+    # the size budget while you are there.
+    #
+    # Reviewed 2026-09-08. Re-check when cosmic-text or winit is next bumped;
+    # this entry should be deleted the day either of those paths goes away.
+    "RUSTSEC-2026-0192",
+]
+
+# ------------------------------------------------------------------- licences
+
+[licenses]
+# **The 56 `examples/features/*` crates have no `license` field, and they are
+# not supposed to have one.**
+#
+# Every one of them is `publish = false` — they are the feature gallery, built
+# and run from this checkout and never uploaded anywhere. cargo-deny does not
+# know that on its own: it walked the workspace, found `feature-sepia`,
+# `feature-tween`, `feature-wide-gamut-color` and 53 more with no license
+# expression, and raised `error[unlicensed]` for each. That is 56 errors about
+# crates with no licensing question to answer, drowning any that are real.
+#
+# `private.ignore` is the switch for exactly this: skip crates cargo itself
+# already knows are unpublishable. A crate that ever gets `publish = true`
+# starts being checked again the same day, with no edit here.
+#
+# The alternative — `license.workspace = true` in 56 manifests — makes a
+# licensing claim about code that is never distributed, which is worse than
+# saying nothing.
+private = { ignore = true }
+# The project is Apache-2.0, and these are the licences it can carry.
+#
+# MIT and BSD are permissive and compatible. Unicode-3.0 is here because the
+# Unicode character tables every text stack depends on carry it. Zlib is
+# `foldhash` and friends. `CC0-1.0` and `Unlicense` are public-domain
+# dedications.
+#
+# **No copyleft, and that is a deliberate line rather than an oversight.** A
+# GPL or AGPL dependency would make the licence this project publishes untrue
+# for anyone linking it, and the failure would be legal rather than technical —
+# exactly the kind that a build cannot notice.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Unlicense",
+    "BSL-1.0",
+    "MPL-2.0",
+]
+# A crate whose licence cannot be determined from its manifest needs a human to
+# look at it, not a default.
+unused-allowed-license = "allow"
+confidence-threshold = 0.9
+
+[[licenses.exceptions]]
+# `unicode-ident` carries the Unicode licence alongside MIT/Apache; listed
+# explicitly so the allow-list above does not have to be widened for it.
+name = "unicode-ident"
+allow = ["Unicode-3.0", "MIT", "Apache-2.0"]
+
+# ------------------------------------------------------------------ bans
+
+[bans]
+# **`warn`, not `deny`, and this is the one place that is right.**
+#
+# Duplicate versions of a transitive crate are a size and compile-time cost, not
+# a correctness problem, and in a tree with wgpu, winit and cosmic-text in it
+# they are unavoidable — those three do not update their shared dependencies in
+# lockstep and nothing in this repository can make them. Failing on it would mean
+# the gate is red for reasons nobody here can fix, which is how a gate gets
+# disabled.
+#
+# It still earns its keep as a warning: `bitflags` at three versions is a fact
+# worth seeing in a log when deciding whether to take a dependency bump.
+multiple-versions = "warn"
+wildcards = "deny"
+# `*` in a first-party manifest means the next breaking release of somebody
+# else's crate lands in this one without a diff. There are none today, and this
+# is what keeps it that way.
+# **`false` here failed the `bans` check on every feature example.**
+#
+# Each of the 56 gallery crates depends on the shared harness by path with no
+# version:
+#
+#     feature-harness = { path = "../harness" }
+#
+# which is a wildcard requirement. `wildcards = "deny"` is right and stays: a
+# wildcard on a *registry* dependency is a real hazard, because it resolves to
+# whatever crates.io serves that day. A path dependency inside this workspace
+# has no such freedom — it resolves to the directory next door and nothing
+# else.
+#
+# `allow-wildcard-paths = true` is cargo-deny's own distinction for that, and
+# it relaxes the rule only for private (`publish = false`) crates, which is
+# every crate this affects. Registry wildcards stay denied.
+allow-wildcard-paths = true
+
+# ---------------------------------------------------------------- sources
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# crates.io only. A git dependency is not reproducible from a version number and
+# cannot be published to crates.io at all, so one arriving here would break the
+# `package` job — later, and less clearly, than this does.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
