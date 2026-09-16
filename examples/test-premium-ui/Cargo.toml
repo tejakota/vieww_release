@@ -1,0 +1,20 @@
+[package]
+name = "test-premium-ui"
+description = "Visual integration test for Vieww's premium UI surface: layout, typography, effects, controls, vectors, charts and motion."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gif = "0.14"
+image = "0.25"
+vieww = { workspace = true, features = ["native"] }
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

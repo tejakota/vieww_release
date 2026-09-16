@@ -1,0 +1,20 @@
+[package]
+name = "test-layout-stress"
+description = "Vieww certification suite."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gif = "0.14"
+vieww-element.workspace = true
+vieww = { workspace = true, features = ["native"] }
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

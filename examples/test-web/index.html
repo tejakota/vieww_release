@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vieww web certification</title>
+<style>
+  /* The page is furniture, not evidence: the canvas is the evidence, so it
+     sits centred and unscaled and nothing overlaps it. */
+  html, body {
+    margin: 0;
+    min-height: 100vh;
+    background: #0b0c10;
+    display: grid;
+    place-items: center;
+    font: 12px ui-monospace, monospace;
+  }
+  /* `image-rendering: pixelated` is deliberate: the canvas buffer is 1:1
+     with CSS pixels, so this changes nothing on the certification machine —
+     and on a HiDPI one it keeps a scaled buffer crisp rather than smeared,
+     which would read as a renderer difference that is not one. */
+  canvas { image-rendering: pixelated; border-radius: 10px; }
+  #boot {
+    position: fixed;
+    top: 10px;
+    left: 12px;
+    color: #5b6478;
+  }
+</style>
+</head>
+<body>
+<!-- The canvas attributes match `test_web::WIDTH`/`HEIGHT`; `mount` resizes
+     the buffer for the device-pixel ratio from there. The fallback content
+     is what a no-wasm browser (and a crawler) sees. -->
+<canvas id="vieww-canvas" width="960" height="600">
+  vieww renders this scene on a canvas; this browser did not run the module.
+</canvas>
+<div id="boot">booting…</div>
+<script type="module">
+  import init from './test_web.js';
+  init()
+    .then(() => { document.getElementById('boot').textContent = 'mounted'; })
+    .catch(e => {
+      document.getElementById('boot').textContent = 'failed: ' + e;
+      throw e;
+    });
+</script>
+</body>
+</html>

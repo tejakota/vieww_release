@@ -1,0 +1,55 @@
+[package]
+name = "reload-android"
+description = "The host half of hot reload, on a phone: an activity that loads its widgets from a library pushed over adb."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Android does not call `main`; the activity loads a shared library and calls
+# `android_main` inside it. Same reason `examples/android.rs` is a cdylib.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vieww-platform-winit.workspace = true
+vieww-foundation.workspace = true
+vieww-reload.workspace = true
+# For the placeholder shown before the first guest arrives. `hot-reload` comes
+# through `vieww-reload` and cargo unifies it, so this is the same `WidgetNode`
+# the guest was built against — which it must be, since the placeholder and the
+# guest's tree go into the same driver.
+vieww-widget.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+log = "0.4"
+android_logger = "0.14"
+
+# **A different package id from `dev.vieww.demo`, deliberately.** The demo is
+# what every device check reports on and it is built *without* hot reload; this
+# one enables `vieww-widget/hot-reload` through `vieww-reload`, so the two
+# disagree about `WidgetNode`'s layout by design. Sharing an id would mean
+# installing one over the other and reporting on whichever landed last.
+[package.metadata.android]
+package = "dev.vieww.reload"
+build_targets = ["aarch64-linux-android"]
+apk_name = "vieww-reload"
+
+[package.metadata.android.sdk]
+min_sdk_version = 24
+# 34, matching the demo, because that is the target the W^X measurement was
+# taken at — see docs/HANDOFF.md. Dropping to 28 to make hot reload "safer"
+# would silently stop testing the configuration that was proven to work.
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "vieww reload"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+
+[package.metadata.android.application.activity]
+orientation = "portrait"
+config_changes = "orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|density"
+
+[lints]
+workspace = true

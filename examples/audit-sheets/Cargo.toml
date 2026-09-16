@@ -1,0 +1,20 @@
+[package]
+name = "audit-sheets"
+description = "Visual audit sheets: one PNG per claimed-but-unproven capability, rendered headlessly through vieww's own rasterizer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-element.workspace = true
+vieww-effects.workspace = true
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

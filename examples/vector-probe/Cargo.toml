@@ -1,0 +1,14 @@
+[package]
+name = "vector-probe"
+description = "Proves the Painting widget's recording reaches the canvas: paths, gradients, strokes, arcs, blurred layers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+
+[lints]
+workspace = true

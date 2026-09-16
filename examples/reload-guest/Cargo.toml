@@ -1,0 +1,23 @@
+[package]
+name = "reload-guest"
+description = "The reloadable half of the hot-reload example: an application's widgets, in a cdylib."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The whole point: a library the host can `dlopen`. `rlib` alongside it so the
+# workspace can still check this crate normally.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The feature comes through `vieww-reload`, which enables it for both halves so
+# they cannot disagree about `WidgetNode`'s layout. Named here anyway because a
+# guest is meaningless without it.
+vieww-widget = { workspace = true, features = ["hot-reload"] }
+vieww-reload.workspace = true
+
+[lints]
+workspace = true

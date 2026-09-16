@@ -1,0 +1,16 @@
+[package]
+name = "screenshot"
+description = "Renders a widget tree to PNG through vieww's own rasterizer — no display, no GPU, no window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# `native` is the whole point: vieww's one and only rasterizer needs no
+# graphics adapter, so it is what a container and a CI box can run.
+vieww = { workspace = true, features = ["native"] }
+
+[lints]
+workspace = true

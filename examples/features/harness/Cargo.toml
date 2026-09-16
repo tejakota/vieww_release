@@ -1,0 +1,24 @@
+[package]
+name = "feature-harness"
+description = "One entry point for the feature examples: a window when there is a display, a PNG when there is not."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# `native` is vieww's one and only renderer: the same code draws the window
+# when there is a display and rasterises to PNG when there is not, which is
+# the only way the repository's "look at a picture of it" rule can be kept
+# for forty examples in CI.
+vieww = { workspace = true, features = ["native"] }
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-platform-winit.workspace = true
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

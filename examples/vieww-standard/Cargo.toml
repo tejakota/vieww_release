@@ -1,0 +1,23 @@
+[package]
+name = "vieww-standard"
+description = "Phase 4: measures all twelve Vieww standard clauses from a real render workload — allocations with a counting allocator, GPU completeness with the real planner — and emits the report."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-foundation.workspace = true
+vieww-gpu.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+vieww-accessibility.workspace = true
+vieww-element.workspace = true
+vieww-render-planner.workspace = true
+vieww-text.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

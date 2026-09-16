@@ -1,0 +1,26 @@
+[package]
+name = "editor"
+description = "viewwstudio's editor pane with everything that is not the text removed: selection, editing, clipboard and scrolling, in one file."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# `native` is vieww's one and only renderer — the same one draws the window
+# and rasterises to PNG with no display attached, which is how the states
+# below get looked at in CI rather than only on a laptop.
+vieww = { workspace = true, features = ["native"] }
+vieww-animation.workspace = true
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+vieww-gestures.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-platform-winit.workspace = true
+vieww-render.workspace = true
+vieww-text.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

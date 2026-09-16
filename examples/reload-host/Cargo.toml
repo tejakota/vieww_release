@@ -1,0 +1,16 @@
+[package]
+name = "reload-host"
+description = "The host half of the hot-reload example: event loop, GPU and element tree, loading its widgets from a rebuilt library."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww-platform-winit.workspace = true
+vieww-foundation.workspace = true
+vieww-reload.workspace = true
+
+[lints]
+workspace = true

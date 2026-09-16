@@ -1,0 +1,18 @@
+[package]
+name = "test-gpu-work"
+description = "Real Vulkan GPU execution probe: geometry, batching, clips, transforms, reuse, readback, and animated GIF evidence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gif = "0.14"
+vieww-foundation.workspace = true
+vieww-gpu.workspace = true
+vieww-hal = { workspace = true, features = ["vulkan"] }
+vieww-paint = { workspace = true, features = ["native"] }
+
+[lints]
+workspace = true
