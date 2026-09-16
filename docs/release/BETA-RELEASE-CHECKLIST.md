@@ -18,15 +18,16 @@ This beta is certified with the machines at hand:
 | Linux, GPU pass | The same laptop, afterwards | `ci/vieww gate --mode gpu`. This is the narrow GPU slice; see below. |
 | Windows, CPU pass | GitHub-hosted runner | Actions → **release-gate** → Run workflow |
 | macOS, CPU pass | GitHub-hosted runner | Same workflow run as Windows |
+| macOS, GPU pass (Apple paravirtual GPU through MoltenVK) | GitHub-hosted runner | Same workflow run. Pixels are valid evidence; timings are not. |
 | Windows / macOS GPU and real windows | A real PC and Mac, if one can be borrowed | `ci/vieww gate --mode gpu`; otherwise WAIVED (see B15) |
 
 1. Freeze a commit and tag it as a candidate. Every run must come from that exact commit, and G0.12 checks it.
 2. **Linux:** run `ci/vieww gate --mode cpu`, then `ci/vieww gate --mode gpu`. Keep the laptop plugged in and don't use it heavily while the timing suites run.
-3. **Windows and macOS:** push the tag, or run the workflow by hand. It uploads `gate-windows`, `gate-macos`, the installers, and a merged `checklist-ci`.
+3. **Windows and macOS:** push the tag, or run the workflow by hand. It uploads `gate-windows-cpu`, `gate-macos-cpu`, `gate-macos-gpu`, the installers, and a merged `checklist-ci`.
 4. **Merge** the downloaded run folders with the Linux ones:
 
    ```bash
-   ci/vieww checklist target/release-gate/linux-cpu-*/ target/release-gate/linux-gpu-*/ gate-windows/ gate-macos/ -o CHECKLIST.md
+   ci/vieww checklist target/release-gate/linux-cpu-*/ target/release-gate/linux-gpu-*/ gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ -o CHECKLIST.md
    ```
 
 5. Do the **[manual]** rows by hand on the installed packages.
@@ -257,7 +258,7 @@ Record **release-hardware** numbers separately from headless results. The measur
 | B6 | P1 | A Vulkan runtime is required on every OS; machines or VMs without one cannot open Studio | Document it in the release notes (G1.14). A CPU-only presentation fallback would be later work. | Open |
 | B7 | P1 | `test-animation-stress` misses its 16.6 ms budget. p95 was 24 ms on a 2-core container; on the first real run (Linux, i5-7200U, 2017 laptop) it was **35 ms**, with 72 of 72 frames over budget. | Decide the minimum supported CPU and publish it, or optimise the 200-tile animation path. Re-measure G1.8 on that minimum machine. | Open |
 | B8 | P2 | Linux and Windows artifact names hard-code `x86_64` | Use the host arch in `package.sh`, or build x86_64 only | Open |
-| B9 | P2 | No hosted CI (`.github/` absent); evidence is produced by hand | Add workflows that call `ci/vieww checks` and `ci/vieww artifacts` | Open |
+| B9 | P2 | No hosted CI | `.github/workflows/release-gate.yml` runs the Windows and macOS legs | Fixed |
 | B10 | P2 | GPU compositor: geometry edges have no anti-aliasing; not used by the live window | Not user-facing in this beta. Keep it out of the marketing claims. | Accepted |
 | B11 | **P0** | **Desktop app segfaulted on real Linux (Wayland, Intel Mesa)** during the desktop suite. Cause: window teardown destroyed the winit window and the Vulkan device while the swapchain and `VkSurfaceKHR` were still alive (Vulkan validation: `VUID-vkDestroyDevice-device-05137`, `VUID-vkDestroyInstance-instance-00629`). Any closing dialog or app exit could crash. | **Fixed** in this tree (`Drop for Gpu` releases the swapchain first). Validation errors are now 0 on X11 and Wayland. Confirm with G1.10 on the same laptop. | Fixed, awaiting re-run |
 | B12 | P1 | Vieww Standard startup took 52.7 ms against a 33.3 ms budget on the i5-7200U. The same run measured the **system font scan at 46 s**. Every window runs that scan synchronously before its first frame (`use_system_fonts`), so Studio may take tens of seconds to open on slower disks. | Measure Studio launch time (G6.1) on that laptop. If it's slow, move the scan off the first frame or cache it. | Open |
@@ -299,7 +300,7 @@ Paste `host.txt` from each gate run.
 | 8 Supply chain | ☐ | | |
 | 9 Signing / trust | ☐ | | |
 | 10 Publishing | ☐ | | |
-| Blockers B1–B10 closed or waived | ☐ | | |
+| Blockers B1–B15 closed or waived | ☐ | | |
 
 **BETA RELEASE: APPROVED / NOT APPROVED**
 

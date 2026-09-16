@@ -28,6 +28,8 @@ release (start here)
                      writes a checked CHECKLIST.md + evidence
   checklist RUN... [-o FILE]
                      combine gate runs from every machine into one checked checklist
+  failures RUN... [-o FILE]
+                     every failed row of gate runs with the end of its log (Markdown)
   artifacts [...]    build installers (packaging/package.sh --installers) + SHA256SUMS + manifest
   sums DIR...        merge per-OS SHA256SUMS files into one for upload
   package-source     write the clean source archive
@@ -61,6 +63,10 @@ shift
 
 case "$cmd" in
 gate) exec bash "$here/release/gate.sh" "$@" ;;
+failures)
+	py=$(command -v python3 || command -v python) || { echo "ci/vieww: python is required" >&2; exit 2; }
+	exec "$py" "$here/release/report-failures.py" "$@"
+	;;
 checklist)
 	py=$(command -v python3 || command -v python) || { echo "ci/vieww: python is required" >&2; exit 2; }
 	exec "$py" "$here/release/fill-checklist.py" "$@"

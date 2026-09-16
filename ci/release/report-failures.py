@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Every failed row of one or more gate runs, with the end of its log, as Markdown.
+
+    ci/vieww failures RUN_DIR [RUN_DIR...] [-o FAILURES.md]
+
+Written for places where the run folder itself is out of reach — a GitHub job
+summary, or a checklist artifact that is easier to open than the run folders.
+For each FAIL row it prints the last lines of that row's log; for a failed
+certification (G1.3) it also names every failed stage inside it with the end of
+that stage's own log, and for a failed `checks` (G1.1) the failing stage names.
+
+Standard library only, so it runs on every OS a gate runs on.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import re
+import sys
+
+TAIL = 60          # lines of log per failure
+WIDTH = 400        # characters per line, so one minified blob cannot flood a summary
+
+
+def tail(path: pathlib.Path, n: int = TAIL) -> str:
+    if not path.is_file():
+        return f"(no log at {path.name})"
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    # Cargo's progress lines say nothing about why something failed.
+    lines = [l for l in lines if not re.match(r"^\s+(Compiling|Checking|Documenting|Downloaded|Downloading|Fresh|Blocking) ", l)]
+    cut = lines[-n:]
+    body = "\n".join(l[:WIDTH] for l in cut)
+    more = f"… {len(lines) - n} earlier lines omitted\n" if len(lines) > n else ""
+    return more + body
+
+
+def block(title: str, text: str) -> str:
+    return f"<details><summary>{title}</summary>\n\n```text\n{text.replace('```', '` ` `')}\n```\n\n</details>\n"
+
+
+def report(run: pathlib.Path) -> tuple[str, int]:
+    rows_path = run / "rows.tsv"
+    if not rows_path.is_file():
+        return f"### `{run.name}`\n\nNot a gate run (no rows.tsv).\n", 0
+    out = [f"### `{run.name}`\n"]
+    failures = 0
+    for line in rows_path.read_text(encoding="utf-8").splitlines():
+        parts = line.split("\t") + ["", "", "", ""]
+        row_id, what, verdict, evidence = parts[:4]
+        if not verdict.upper().startswith("FAIL"):
+            continue
+        failures += 1
+        out.append(f"#### ❌ {row_id} — {what}\n\n`{verdict}`\n")
+        if evidence.startswith("logs/"):
+            out.append(block(f"end of {evidence}", tail(run / evidence)))
+        if row_id == "G1.1":
+            log = run / "logs" / "G1.1.txt"
+            if log.is_file():
+                text = log.read_text(encoding="utf-8", errors="replace").splitlines()
+                failed = [l.strip()[len("FAILED:"):].strip() for l in text if l.strip().startswith("FAILED:")]
+                if failed:
+                    out.append("Failed stages in `checks`:\n\n" + "\n".join(f"- {l}" for l in failed[:20]) + "\n")
+                # A stage's error is in the middle of a long log, not at its end:
+                # pull the error-shaped lines out of each failed stage's section.
+                sections: dict[str, list[str]] = {}
+                current = ""
+                for l in text:
+                    if l.startswith("==> "):
+                        current = l[4:].strip()
+                        sections[current] = []
+                    elif current:
+                        sections[current].append(l)
+                pattern = re.compile(r"error(\[|:)|panicked|FAILED|failures:|test result: FAILED|^---- |fatal|denied|rejected|no such|not found", re.I)
+                for stage, body in sections.items():
+                    if not any(stage.startswith(f.split(" (exit")[0]) for f in failed):
+                        continue
+                    hits = [l[:WIDTH] for l in body if pattern.search(l)][:80]
+                    if hits:
+                        out.append(block(f"errors in stage: {stage}", "\n".join(hits)))
+        if row_id == "G1.3":
+            stages = run / "cert" / "quality" / "stages.txt"
+            if stages.is_file():
+                for s in stages.read_text(encoding="utf-8").splitlines():
+                    m = re.match(r"^(\S+)\s+(FAIL.*)$", s)
+                    if not m:
+                        continue
+                    name, v = m.groups()
+                    rel = name.replace("\\", "/")
+                    out.append(f"- certification stage **{rel}**: `{v}`\n")
+                    log = run / "cert" / f"{rel}.txt"
+                    if log.is_file():
+                        out.append(block(f"end of cert/{rel}.txt", tail(log)))
+    if failures == 0:
+        out.append("No failed rows.\n")
+    return "\n".join(out), failures
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("runs", nargs="+", type=pathlib.Path)
+    ap.add_argument("-o", "--output", type=pathlib.Path)
+    args = ap.parse_args()
+    parts = ["## Failures, with logs\n"]
+    total = 0
+    for run in args.runs:
+        text, n = report(run)
+        parts.append(text)
+        total += n
+    md = "\n".join(parts)
+    if args.output:
+        args.output.write_text(md, encoding="utf-8")
+    else:
+        sys.stdout.write(md)
+    print(f"{total} failed row(s)", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

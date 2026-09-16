@@ -6,19 +6,21 @@
 # and installer, with GPU execution and the real-window desktop suite recorded
 # as SKIPPED rather than pretended.
 #
-# Run it from the Actions tab ("Run workflow"), or by pushing a tag `v*`.
+# Runs on every push to main (failed rows only), on a `v*` tag (full gate), or
+# from the Actions tab ("Run workflow").
 # It never runs on pull requests: this repository is public, and a pull request
 # from a fork must not get a multi-hour job, or any job with write access.
 #
 # Results:
-#   gate-windows, gate-macos    run folders (CHECKLIST.md, logs, evidence)
+#   gate-windows-cpu, gate-macos-cpu, gate-macos-gpu
+#                               run folders (CHECKLIST.md, logs, evidence)
 #   installers-windows/-macos   .msi/.zip, .dmg, SHA256SUMS, MANIFEST.txt
 #   checklist-ci                both runs merged into one CHECKLIST-ci.md
 #                               (also shown on the run's summary page)
 #
 # Merge with the local Linux runs:
 #   ci/vieww checklist target/release-gate/linux-cpu-* target/release-gate/linux-gpu-* \
-#       gate-windows/ gate-macos/ -o CHECKLIST.md
+#       gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ -o CHECKLIST.md
 
 name: release-gate
 
@@ -30,12 +32,21 @@ on:
         type: choice
         options: [gate, checks]
         default: gate
+      rerun:
+        description: "failed = only the rows that failed last time (see RERUN LISTS below); all = full gate"
+        type: choice
+        options: [failed, all]
+        default: failed
       package:
         description: "Build installers"
         type: boolean
         default: true
+  # A push to main reruns the failed-row lists below (the same as a manual run
+  # with rerun=failed); a `v*` tag runs the full gate. A newer push to the same
+  # ref cancels the run still in progress (see `concurrency`).
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -46,15 +57,44 @@ concurrency:
 
 jobs:
   gate:
-    name: gate (${{ matrix.os }})
+    name: gate (${{ matrix.os }}, ${{ matrix.mode }})
     strategy:
       fail-fast: false
       matrix:
+        # ── RERUN LISTS ─────────────────────────────────────────────────────
+        # `failed:` is what a push to main, or a manual run with rerun=failed,
+        # executes (a `v*` tag always runs everything). From the 2026-09-16 run
+        # (commit 8a646c69), these rows PASSED and are left out of reruns:
+        #
+        #   both:    G0.2 lockfile · G0.3 toolchain · G0.4 release-clean ·
+        #            G0.6 LICENSE · G0.7 secrets scan · G1.2 platform build ·
+        #            G1.7 CPU renderer · G1.8 animation stress ·
+        #            G1.9 Vieww Standard · G1.13 screenshots · G2.1 Studio walkthrough
+        #   macOS:   G3.1 installer (.dmg) + G8.1/G8.2 checksums
+        #
+        # and these FAILED, so they are what reruns execute. G1.3 re-runs the
+        # whole certification (its stages are not separable from the outside);
+        # G0.12 is computed when runs are merged and needs no row here.
+        # Once a row passes, delete it from its list; empty the list (or pick
+        # rerun=all) for the final certification run.
         include:
           - os: windows
             runner: windows-latest
+            mode: cpu
+            failed: G0.5,G0.8,G1.1,G1.3,G3.1
           - os: macos
             runner: macos-latest
+            mode: cpu
+            failed: G0.5,G0.8,G1.1,G1.3
+          # The macOS runner exposes Apple's paravirtualized GPU, which MoltenVK
+          # drives: the narrow GPU pass there is the only test of the Vulkan
+          # parity suite and census through MoltenVK (blocker B1's portability
+          # path) that this project has. A virtual device, not a user's GPU, so
+          # its timings mean nothing; its pixels do.
+          - os: macos
+            runner: macos-latest
+            mode: gpu
+            failed: ""   # new job: nothing has passed yet, so it always runs in full
     runs-on: ${{ matrix.runner }}
     # Hosted jobs are cut off at 6 hours.
     timeout-minutes: 350
@@ -66,7 +106,9 @@ jobs:
       # No display a test can own, and no GPU: see the header.
       VIEWW_CERT_NO_DESKTOP: "1"
       SCOPE: ${{ github.event_name == 'push' && 'gate' || inputs.scope }}
-      PACKAGE: ${{ github.event_name == 'push' && 'true' || inputs.package }}
+      PACKAGE: ${{ matrix.mode == 'cpu' && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
+      # Tag: everything. Push to main: the failed lists. Manual: the rerun choice.
+      ONLY: ${{ !startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || inputs.rerun == 'failed') && matrix.failed || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,20 +143,41 @@ jobs:
       - name: Release gate
         if: env.SCOPE == 'gate'
         run: |
-          args=(--mode cpu --out "target/release-gate/${{ matrix.os }}-cpu")
+          args=(--mode "${{ matrix.mode }}" --out "target/release-gate/${{ matrix.os }}-${{ matrix.mode }}")
           [[ "$PACKAGE" == true ]] || args+=(--skip-package)
+          if [[ -n "$ONLY" ]]; then
+            echo "rerunning only: $ONLY"
+            args+=(--only "$ONLY")
+            [[ ",$ONLY," == *",G3.1,"* ]] || args+=(--skip-package)
+          fi
           bash ci/vieww gate "${args[@]}"
 
+      # The failures and the end of each one's log, on the run's summary page and
+      # in the job log — readable without downloading anything.
+      - name: Failures with logs
+        if: always() && env.SCOPE == 'gate'
+        run: |
+          run="target/release-gate/${{ matrix.os }}-${{ matrix.mode }}"
+          [[ -f "$run/rows.tsv" ]] || { echo "no run folder"; exit 0; }
+          py=$(command -v python3 || command -v python)
+          "$py" ci/release/report-failures.py "$run" -o "$run/FAILURES.md"
+          cat "$run/FAILURES.md"
+          {
+            echo "# ${{ matrix.os }} (${{ matrix.mode }})"
+            cat "$run/FAILURES.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checks only
-        if: env.SCOPE == 'checks'
+        if: env.SCOPE == 'checks' && matrix.mode == 'cpu'
         run: bash ci/vieww checks
 
       - name: Upload run folder
         if: always() && env.SCOPE == 'gate'
         uses: actions/upload-artifact@v4
         with:
-          name: gate-${{ matrix.os }}
-          path: target/release-gate/${{ matrix.os }}-cpu
+          name: gate-${{ matrix.os }}-${{ matrix.mode }}
+          path: target/release-gate/${{ matrix.os }}-${{ matrix.mode }}
+          include-hidden-files: true
           retention-days: 30
           if-no-files-found: warn
 
@@ -149,9 +212,23 @@ jobs:
           dirs=(runs/gate-*)
           if ((${#dirs[@]} == 0)); then echo "no run folders to merge"; exit 0; fi
           python3 ci/release/fill-checklist.py "${dirs[@]}" -o CHECKLIST-ci.md || true
-          cat CHECKLIST-ci.md >> "$GITHUB_STEP_SUMMARY"
+          python3 ci/release/report-failures.py "${dirs[@]}" -o FAILURES.md
+          # Failures first: they are what a person opens this for.
+          cat FAILURES.md >> "$GITHUB_STEP_SUMMARY"
+          { echo; cat FAILURES.md; } >> CHECKLIST-ci.md
+          # Every log of every run, without the images, in the same artifact as
+          # the checklist (the one that is easy to find and download).
+          mkdir -p logs
+          for d in "${dirs[@]}"; do
+            name=$(basename "$d")
+            (cd "$d" && find . \( -name '*.txt' -o -name '*.tsv' -o -name '*.json' -o -name '*.md' -o -name '*.log' \) -print) |
+              while read -r f; do mkdir -p "logs/$name/$(dirname "$f")"; cp "$d/$f" "logs/$name/$f"; done
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: checklist-ci
-          path: CHECKLIST-ci.md
+          path: |
+            CHECKLIST-ci.md
+            FAILURES.md
+            logs/
           if-no-files-found: warn
