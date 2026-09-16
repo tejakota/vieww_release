@@ -5,8 +5,9 @@
 #   bash ci/tools/ci-runner-prep.sh
 #
 # Hosted runner images ship tens of GB of SDKs this repository never uses
-# (Android, .NET, Haskell, extra simulators), and the space left over is less
-# than a gate needs even in lean mode. This deletes those, and on Windows
+# (.NET, Haskell, CodeQL, extra simulators), and the space left over can be less
+# than a gate needs even in lean mode. The Android SDK and NDK are KEPT: Studio's
+# Android export (G2.10) builds with them. This deletes the rest, and on Windows
 # points `target/` at whichever drive has the most room.
 #
 # Only for throwaway CI machines: it deletes system SDKs. It refuses to run
@@ -36,16 +37,14 @@ gone() {
 
 case "$(uname -s)" in
 Darwin)
-	gone "${ANDROID_HOME:-/nonexistent}" "$HOME/Library/Android" "$HOME/.dotnet" \
+	gone "$HOME/.dotnet" \
 		/usr/local/share/dotnet "$HOME/.ghcup" /usr/local/lib/node_modules \
 		"$HOME/Library/Developer/CoreSimulator/Caches"
-	# iOS/watchOS/tvOS simulator runtimes: several GB each, and this gate only
-	# builds the macOS app. The default Xcode itself stays (hdiutil, clang).
-	sudo xcrun simctl runtime delete all 2>/dev/null || true
-	xcrun simctl delete all 2>/dev/null || true
+	# Xcode and its iOS simulator platform stay: Studio's iOS simulator export
+	# (G2.11) builds against them, and hdiutil packages the .dmg.
 	;;
 MINGW* | MSYS* | CYGWIN*)
-	gone /c/Android /c/hostedtoolcache/windows/go /c/hostedtoolcache/windows/CodeQL \
+	gone /c/hostedtoolcache/windows/go /c/hostedtoolcache/windows/CodeQL \
 		/c/ghcup /c/tools/ghc* /c/Strawberry
 	# The checkout lives on D:, which is small on some images; C: usually has
 	# far more room. A junction keeps `target/` at the path every script
@@ -61,7 +60,7 @@ MINGW* | MSYS* | CYGWIN*)
 	fi
 	;;
 Linux)
-	gone /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+	gone /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
 	sudo docker image prune --all --force >/dev/null 2>&1 || true
 	;;
 esac

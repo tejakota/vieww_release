@@ -196,7 +196,15 @@ pub fn plan(env: &Env, root: &Path, name: &str, format: Format) -> Result<Plan, 
     if let Some(why) = report.impossible {
         return Err(Refusal::Impossible(why));
     }
-    if let Some(missing) = report.missing().first() {
+    // A simulator build is signed ad hoc by Xcode itself ("Sign to Run
+    // Locally"); only a device `.ipa` needs a real identity. Requiring one
+    // here refused the simulator export to everybody without an Apple
+    // developer account, which is the format that exists for exactly them.
+    let missing = report
+        .missing()
+        .into_iter()
+        .find(|r| !(format == Format::IosSimulatorApp && r.name == "Signing identity"));
+    if let Some(missing) = missing {
         return Err(Refusal::Missing {
             requirement: missing.name,
             install: missing.install,
@@ -411,15 +419,21 @@ fn ios_app(env: &Env, root: &Path, name: &str, out: &Path) -> Result<Plan, Refus
                 why: "the simulator runs arm64 on an Apple-silicon Mac",
             },
             Step {
-                spec: Spec::new("Package .app", "xcodebuild", root.join("ios")).args([
-                    "-scheme",
-                    name,
-                    "-sdk",
-                    "iphonesimulator",
-                    "-configuration",
-                    "Release",
-                    "build",
-                ]),
+                // `CONFIGURATION_BUILD_DIR`: without it the `.app` lands in
+                // Xcode's DerivedData, nothing copied it out, and the plan's
+                // artefact path never existed — an export that "succeeded"
+                // and produced nothing.
+                spec: Spec::new("Package .app", "xcodebuild", root.join("ios"))
+                    .args([
+                        "-scheme",
+                        name,
+                        "-sdk",
+                        "iphonesimulator",
+                        "-configuration",
+                        "Release",
+                        "build",
+                    ])
+                    .arg(format!("CONFIGURATION_BUILD_DIR={}", out.to_string_lossy())),
                 why: "assembles the bundle Xcode's project describes",
             },
         ],

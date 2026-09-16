@@ -207,6 +207,9 @@ if [[ -n "$free_kb" ]]; then
 	echo "disk_free_gb=$free_gb" >>"$out/host.txt"
 	need_gb=30
 	[[ "$mode" == gpu ]] && need_gb=10
+	# A partial rerun builds a fraction of the tree (the export route alone is
+	# a few GB); the full-gate figure would fail small hosted runners for nothing.
+	[[ -n "$only" ]] && ((need_gb > 15)) && need_gb=15
 	[[ "$VIEWW_LEAN" == 1 ]] || need_gb=100
 	[[ -n "$keep_builds" ]] && need_gb=$((need_gb + 20))
 	if ((free_gb < need_gb)); then
@@ -324,6 +327,62 @@ fi
 [[ "$mode" == gpu ]] || row G2.1 "Studio release_check + tour + walkthrough (full, not --quick)" bash ci/certify/release-check.sh "$out/studio"
 [[ -n "$hidpi" ]] && row G2.3 "desktop suite on a HiDPI display" bash ci/certify/desktop-suite.sh --expect-hidpi
 [[ -n "$multi" ]] && row G2.4 "desktop suite across two displays" bash ci/certify/desktop-suite.sh --expect-multi-monitor
+
+# ── Studio's export route: scaffold → compile every target → real exports ──
+# One run of ci/certify/export-suite.sh answers G2.7-G2.11. Its projects live
+# outside the repository (see that script), under a scratch directory removed
+# afterwards; only results.txt and the logs are kept in the run folder.
+if [[ "$mode" != gpu ]] && { wanted G2.7 || wanted G2.8 || wanted G2.9 || wanted G2.10 || wanted G2.11; }; then
+	export_out="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/vieww-export-check-$stamp"
+	export_args=("$export_out")
+	[[ -n "${VIEWW_EXPORT_INSTALL_TARGETS:-}" ]] && export_args+=(--install-targets)
+	echo "==> G2.7-G2.11 Studio export route (scaffold, compile, export)"
+	bash ci/certify/export-suite.sh "${export_args[@]}" >"$out/logs/export-suite.txt" 2>&1
+	mkdir -p "$out/export"
+	cp "$export_out/results.txt" "$out/export/" 2>/dev/null
+	cp -R "$export_out/logs" "$out/export/" 2>/dev/null
+	[[ "$VIEWW_LEAN" == 1 && -z "$keep_builds" ]] && rm -rf "$export_out"
+	results_file="$out/export/results.txt"
+
+	# export_verdict ROW WHAT PATTERN REQUIRED — fold export-check lines into a row.
+	# REQUIRED=1: a SKIPPED/REFUSED line is not a pass (the host could run it).
+	export_verdict() {
+		local id="$1" what="$2" pattern="$3" required="$4" lines fails skips passes
+		if [[ ! -f "$results_file" ]]; then
+			note "$id" "$what" "FAIL(export suite produced no results; see logs/export-suite.txt)" logs/export-suite.txt
+			return
+		fi
+		lines=$(grep -E "^export-check: ($pattern) " "$results_file")
+		fails=$(echo "$lines" | grep -c ' FAIL' || true)
+		skips=$(echo "$lines" | grep -E ' (SKIPPED|REFUSED) ' | sed -E 's/^export-check: ([^ ]+) (SKIPPED|REFUSED) (.*)$/\1: \3/' | paste -sd ';' -)
+		passes=$(echo "$lines" | grep -c ' PASS' || true)
+		if [[ -z "$lines" ]]; then
+			note "$id" "$what" "NOT RUN" export/results.txt
+		elif ((fails > 0)); then
+			note "$id" "$what" "FAIL($(echo "$lines" | grep ' FAIL' | head -2 | cut -c15-220 | paste -sd ';' -))" export/results.txt
+		elif [[ -n "$skips" && "$required" == 1 ]]; then
+			note "$id" "$what" "SKIPPED(${skips:0:300})" export/results.txt
+		elif ((passes > 0)); then
+			note "$id" "$what" "PASS" export/results.txt
+		else
+			note "$id" "$what" "SKIPPED(${skips:0:300})" export/results.txt
+		fi
+	}
+	# Which cross targets each host is expected to be able to compile.
+	case "$os" in
+	macos) compile_pattern='compile/(desktop|android|windows|ios|ios-sim)-[a-z]+' ;;
+	*) compile_pattern='compile/(desktop|android|windows)-[a-z]+' ;;
+	esac
+	export_verdict G2.7 "scaffolded Rust + Say projects compile for every target" "$compile_pattern" 1
+	export_verdict G2.8 "Studio export: desktop binary" 'export/desktop' 1
+	export_verdict G2.9 "Studio export: Windows .exe" 'export/windows' 1
+	export_verdict G2.10 "Studio export: Android .apk (cargo-ndk + Gradle)" 'export/android' 1
+	if [[ "$os" == macos ]]; then
+		export_verdict G2.11 "Studio export: iOS simulator .app" 'export/ios-sim' 1
+	else
+		note G2.11 "Studio export: iOS simulator .app" "N/A(macOS only — Apple's toolchain)" ""
+	fi
+fi
 
 # ── Gate 3 / 8: artifacts and integrity ──────────────────────────────────────
 if [[ "$mode" == gpu ]]; then
