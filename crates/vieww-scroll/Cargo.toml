@@ -1,0 +1,19 @@
+[package]
+name = "vieww-scroll"
+description = "Scrolling as one crate: physics and snapping re-exported from where they already live (vieww-gestures, vieww-element) plus what did not exist yet — a real scrollbar widget (draggable thumb, proportional sizing, auto-hide) and nested-scroll coordination."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-gestures.workspace = true
+vieww-animation.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

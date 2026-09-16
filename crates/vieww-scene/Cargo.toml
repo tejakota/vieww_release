@@ -1,0 +1,17 @@
+[package]
+name = "vieww-scene"
+description = "Renderer-independent scene IR: the boundary between the paint layer and the render graph/planner/GPU stack."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-paint.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,40 @@
+[package]
+name = "vieww-widget"
+description = "The vieww widget tree: cheap, immutable descriptions of UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Reconciliation identifies widgets by type *path* rather than by `TypeId`, so
+# element state survives the guest library being rebuilt. Development only —
+# see `docs/HOT-RELOAD.md`. A shipped build keeps the exact rule.
+hot-reload = []
+
+# No `[package.metadata.docs.rs]` here, and that is deliberate rather than
+# missed. `all-features` would build the documentation with `hot-reload` on,
+# and the published reference would then describe reconciliation by type *path*
+# — which is not the rule a shipped build uses. Documenting the development
+# semantics as the semantics is worse than documenting one less feature.
+
+[dependencies]
+# The implicit animation widgets need curves, tweens and a controller. Both of
+# these sit below the widget layer, so the "a widget knows nothing about pixels"
+# rule is untouched.
+vieww-animation.workspace = true
+vieww-foundation.workspace = true
+vieww-text.workspace = true
+
+# The `#[widget]` attribute, re-exported from this crate's root so an
+# application writes `use vieww::prelude::*` and has it, rather than adding a
+# second crate to its own manifest for an attribute that is useless without
+# this one. A proc-macro dependency costs a build-time crate and nothing at
+# runtime; see `vieww-widget-macros`' own docs for exactly what it writes.
+vieww-widget-macros.workspace = true
+
+[lints]
+workspace = true

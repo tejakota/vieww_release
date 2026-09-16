@@ -1,0 +1,28 @@
+[package]
+name = "vieww-plugin-macros"
+description = "The #[vieww_plugin] registration macro: generates the extern \"C\" entry point vieww-plugin's host loader looks for, so a plugin author writes one attribute instead of hand-rolling the ABI's export shape."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# This project's first proc-macro crate (confirmed by audit — no
+# `proc-macro = true` manifest existed anywhere in the workspace before this
+# one), so there is no in-house precedent to follow; `syn`/`quote`/`proc-macro2`
+# are the ecosystem's standard triple for exactly this job and are already
+# transitively present many times over (naga, winit and others all pull them
+# in), so this adds a feature to crates already in the tree rather than a new
+# one to audit.
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

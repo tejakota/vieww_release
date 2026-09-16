@@ -1,0 +1,17 @@
+[package]
+name = "feature-container-padding"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-animation.workspace = true
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+feature-harness = { path = "../harness" }
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "animation-showcase"
+description = "Interactive showcase of vieww's motion system: springs, timelines, physics drags, charts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-animation.workspace = true
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+vieww-platform-winit.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

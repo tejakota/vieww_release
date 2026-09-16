@@ -1,0 +1,25 @@
+[package]
+name = "vieww-build"
+description = "Packaging pipelines: turning a built vieww app into a platform artefact (macOS .app, Windows MSI via WiX, Linux .desktop bundle, Android APK, iOS .ipa), and the environment doctor checks a build needs before any of that is worth attempting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# For `doctor`'s display check only, and with no features: default
+# `vieww-hardware` has no dependencies of its own (see its own `Cargo.toml`
+# comment) — the `gpu` feature is what would pull in `vieww-hal`, `ash` and
+# `naga`, and a build-health check has no business dragging a Vulkan loader
+# into this crate's graph to answer "can cargo find a display". So this names
+# the crate and nothing behind its one feature flag. See `doctor`'s module
+# docs for why the GPU capability is not probed here at all.
+vieww-hardware.workspace = true
+
+[lints]
+workspace = true

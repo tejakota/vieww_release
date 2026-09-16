@@ -1,0 +1,105 @@
+[package]
+name = "vieww-paint"
+description = "The vieww paint layer: canvas, scenes, layers, damage tracking, and vieww's own ground-up rasterizer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# `native` (`src/native/`) — vieww's own ground-up rasterizer, and this
+# crate's one and only renderer since `gpu`/`hybrid`/`cpu` (the vello-based
+# backends this crate used to also ship) were removed entirely; see
+# `docs/RENDERER-MIGRATION.md`. Optional so that the core layers — canvas,
+# scene, layers, damage, scheduling — stay dependency-free and fast to
+# compile and to cross-compile; applications turn it on, and tests of the
+# layout and paint *model* do not need it. See docs/DESIGN.md §11.
+#
+# No GPU dependency here at all: glyph outlines come from `ttf-parser` and
+# `render_to_png` from `png`. `vieww-hal`'s own, separate crate is what
+# `vieww-platform-winit`'s `native` module presents this renderer's output
+# through — a real Vulkan swapchain, not `wgpu`.
+#
+# `variable-fonts` is what switches on `Face::set_variation` — without it a
+# variable font's outlines silently rasterize at the default instance, which
+# is exactly the bug the `wght` plumbing in `glyph.rs` exists to fix.
+ttf-parser = { version = "0.25", optional = true, features = ["variable-fonts"] }
+png = { version = "0.17", optional = true }
+# Variable-font axes (fvar/avar normalization), colour-glyph tables (COLR/CPAL
+# through `raw::tables`) and CBDT/sbix bitmap strikes for colour emoji — the
+# three things `ttf-parser` does not read. Version-matched to the copy already
+# in the lock via `cosmic-text`, so enabling this adds no new downloads.
+skrifa = { version = "0.40", optional = true, default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# Tests only, and no dependency cycle: `vieww-text` depends on
+# `vieww-foundation` alone. Glyph tests need a font with real outlines —
+# `ttf-parser` panics on invalid ones, so a placeholder will not do.
+vieww-text.workspace = true
+# `tests/native_parity.rs` and `examples/native_showcase.rs` write GIFs of
+# an animated scene; a dev-only need.
+gif = "0.14"
+
+[features]
+default = []
+native = ["dep:ttf-parser", "dep:png", "dep:skrifa"]
+
+# **The four test targets that need the renderer, and the examples that draw
+# with it, declared as needing it.**
+#
+# Without these, `cargo test -p vieww-paint` — the command this crate's own
+# TRACKER row tells a contributor to run — did not fail a test. It failed to
+# *compile*, with `unresolved import vieww_paint::native` and a `note: found an
+# item that was configured out` pointing at a feature the reader has no reason
+# to know exists. Every one of the 224 tests in those files was unreachable
+# except to somebody who already knew to type `--features native`.
+#
+# `required-features` is what cargo has for this: the target is skipped when the
+# feature is off instead of being compiled and failing. `ci/check/checks.sh` turns the
+# feature on, so the tests still run where it matters.
+[[test]]
+name = "native_parity"
+required-features = ["native"]
+
+[[test]]
+name = "retained_equivalence"
+required-features = ["native"]
+
+[[test]]
+name = "glyph_residency"
+required-features = ["native"]
+
+[[test]]
+name = "linear_light_pipeline"
+required-features = ["native"]
+
+[[example]]
+name = "native_showcase"
+required-features = ["native"]
+
+[[example]]
+name = "blur_bench"
+required-features = ["native"]
+
+[[example]]
+name = "perf_probe"
+required-features = ["native"]
+
+[[example]]
+name = "floor_probe"
+required-features = ["native"]
+
+[[example]]
+name = "edge_probe"
+required-features = ["native"]
+
+[package.metadata.docs.rs]
+features = ["native"]
+
+[lints]
+workspace = true

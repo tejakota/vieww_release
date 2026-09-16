@@ -1,0 +1,23 @@
+[package]
+name = "vieww-plugin"
+description = "A stable, versioned plugin ABI: a third-party cdylib built against a different rustc/vieww-plugin version than the host still loads and runs, unlike vieww-reload's dev-time hot-reload (which requires the exact same compilation unit on both sides)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-plugin-macros = { path = "../vieww-plugin-macros", version = "0.1.0" }
+
+# The one platform-specific piece a plugin ABI cannot avoid: opening a
+# `cdylib` at runtime and resolving its symbols. `libloading` is already this
+# workspace's answer to that (see `vieww-reload`'s and `viewwstudio`'s own
+# `dlopen`-based guest loading) — reused here rather than a second
+# hand-rolled FFI-loading path.
+libloading = "0.8"
+
+[lints]
+workspace = true

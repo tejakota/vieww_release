@@ -1,0 +1,40 @@
+[package]
+name = "test-web"
+description = "Web-backend certification: one deterministic scene, rasterised natively and in a browser canvas, compared byte for byte — plus the tap that proves input reaches the tree on wasm."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# `cdylib` for the wasm build (`wasm-bindgen --target web`), `rlib` for the
+# native baseline example — the same shape as `apps/viewwsite`, for the same
+# reason: one tree, two targets, and the second must be able to `use` the
+# first without dragging the browser half onto the host.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The umbrella, without `native`: on wasm this is exactly what the browser
+# half gets, and on the host it compiles the same tree for the baseline.
+# `examples/baseline.rs` re-depends on it *with* `native` for the
+# rasteriser.
+vieww = { workspace = true }
+vieww-foundation.workspace = true
+vieww-widget.workspace = true
+
+# The browser half, and only it. Everything web is behind
+# `cfg(target_arch = "wasm32")`, so on the host this crate builds to the
+# scene library alone — `cargo check --workspace` on a machine without the
+# target is unaffected, which is the same guarantee `vieww-platform-web`
+# itself makes.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+vieww-platform-web.workspace = true
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+# `examples/baseline.rs`: the same scene through the host rasteriser.
+vieww = { workspace = true, features = ["native"] }
+
+[lints]
+workspace = true

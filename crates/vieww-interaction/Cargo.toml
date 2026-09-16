@@ -1,0 +1,16 @@
+[package]
+name = "vieww-interaction"
+description = "Input the render tree does not already own: keyboard shortcut/accelerator tables, a named-action command registry, and the portable half of outbound drag-and-drop — sitting beside vieww-gestures rather than inside vieww-render, so an application can bind a shortcut or register a command with no tree, no frame and no window in sight."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+[lints]
+workspace = true

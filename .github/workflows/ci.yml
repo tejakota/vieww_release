@@ -1,0 +1,157 @@
+# Windows and macOS legs of the beta release gate, on GitHub-hosted runners.
+#
+# Linux runs on a real machine (`ci/vieww gate --mode cpu`, then `--mode gpu`),
+# because that is where a real GPU and display are. These runners have neither,
+# so this workflow is the CPU pass only: every build, test, suite, screenshot
+# and installer, with GPU execution and the real-window desktop suite recorded
+# as SKIPPED rather than pretended.
+#
+# Run it from the Actions tab ("Run workflow"), or by pushing a tag `v*`.
+# It never runs on pull requests: this repository is public, and a pull request
+# from a fork must not get a multi-hour job, or any job with write access.
+#
+# Results:
+#   gate-windows, gate-macos    run folders (CHECKLIST.md, logs, evidence)
+#   installers-windows/-macos   .msi/.zip, .dmg, SHA256SUMS, MANIFEST.txt
+#   checklist-ci                both runs merged into one CHECKLIST-ci.md
+#                               (also shown on the run's summary page)
+#
+# Merge with the local Linux runs:
+#   ci/vieww checklist target/release-gate/linux-cpu-* target/release-gate/linux-gpu-* \
+#       gate-windows/ gate-macos/ -o CHECKLIST.md
+
+name: release-gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "gate = everything; checks = fmt/clippy/docs/tests only (faster)"
+        type: choice
+        options: [gate, checks]
+        default: gate
+      package:
+        description: "Build installers"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+          - os: macos
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    # Hosted jobs are cut off at 6 hours.
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      # No display a test can own, and no GPU: see the header.
+      VIEWW_CERT_NO_DESKTOP: "1"
+      SCOPE: ${{ github.event_name == 'push' && 'gate' || inputs.scope }}
+      PACKAGE: ${{ github.event_name == 'push' && 'true' || inputs.package }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Make disk space
+        run: bash ci/tools/ci-runner-prep.sh
+
+      - name: Rust toolchain (from rust-toolchain.toml)
+        run: |
+          rustup toolchain install   # reads rust-toolchain.toml (channel + components)
+          rustc --version
+          cargo --version
+
+      - name: cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: WiX (Windows installer)
+        if: matrix.os == 'windows' && env.PACKAGE == 'true'
+        # v5: the last major without a EULA acceptance step; package.sh needs
+        # only `wix build` and the <Files> element (v5+).
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Vulkan loader + MoltenVK (macOS; stages skip if no device)
+        if: matrix.os == 'macos'
+        run: brew install molten-vk vulkan-loader vulkan-tools || true
+
+      - name: Release gate
+        if: env.SCOPE == 'gate'
+        run: |
+          args=(--mode cpu --out "target/release-gate/${{ matrix.os }}-cpu")
+          [[ "$PACKAGE" == true ]] || args+=(--skip-package)
+          bash ci/vieww gate "${args[@]}"
+
+      - name: Checks only
+        if: env.SCOPE == 'checks'
+        run: bash ci/vieww checks
+
+      - name: Upload run folder
+        if: always() && env.SCOPE == 'gate'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-${{ matrix.os }}
+          path: target/release-gate/${{ matrix.os }}-cpu
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload installers
+        if: always() && env.SCOPE == 'gate' && env.PACKAGE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            target/package/viewwstudio-*
+            target/package/SHA256SUMS
+            target/package/MANIFEST.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+  checklist:
+    name: merged checklist
+    needs: gate
+    if: always() && (github.event_name == 'push' || inputs.scope == 'gate')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gate-*
+          path: runs
+      - name: Fill the checklist from both runs
+        run: |
+          shopt -s nullglob
+          dirs=(runs/gate-*)
+          if ((${#dirs[@]} == 0)); then echo "no run folders to merge"; exit 0; fi
+          python3 ci/release/fill-checklist.py "${dirs[@]}" -o CHECKLIST-ci.md || true
+          cat CHECKLIST-ci.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checklist-ci
+          path: CHECKLIST-ci.md
+          if-no-files-found: warn

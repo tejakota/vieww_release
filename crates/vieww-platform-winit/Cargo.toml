@@ -1,0 +1,267 @@
+[package]
+name = "vieww-platform-winit"
+description = "The vieww platform bridge: a window, a swapchain, a lifecycle and raw input, via winit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Real backends for `vieww_foundation::desktop`. Off by default; see the
+# dependency block below for why, and `src/desktop.rs` for what it provides on
+# each platform.
+#
+# The tests for `src/raster.rs` only run with this on, because the rasteriser
+# exists to feed the tray and compiling it otherwise would be dead code under
+# `-D warnings`:
+#
+#     cargo test -p vieww-platform-winit --features desktop-services
+desktop-services = ["dep:tray-icon", "dep:global-hotkey", "dep:gtk"]
+
+[dependencies]
+vieww-foundation.workspace = true
+# **For `App::theme`.** Already in this crate's graph through `vieww-render`,
+# which depends on it; named here because `App::theme` takes a `ThemeData` in
+# its signature, and relying on a transitive dependency's version is how a build
+# breaks on somebody else's patch release. See `vieww-render`'s
+# `FrameDriver::set_theme` for the bug the pair of them close.
+vieww-widget.workspace = true
+# The rendering backend is not optional *here*: this crate exists to put a
+# frame on a screen, and there is no screen without one. Core crates stay
+# unaffected — they do not depend on this one, and nothing depends on this
+# one except an application. See docs/DESIGN.md §11 and §17.
+#
+# `src/native.rs`: CPU rasterisation via `vieww_paint::native::NativeRenderer`,
+# presented through `vieww-hal`'s real `VK_KHR_swapchain` — no `wgpu`, no
+# vello anywhere in it. This replaced the vello-based `gpu` backend as this
+# crate's one and only renderer; `vieww-paint`'s `gpu`, `hybrid` and `cpu`
+# (the vello family) are no longer named here at all. See `src/native.rs`
+# and `docs/RENDERER-MIGRATION.md` for the full account of the migration.
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-hal = { workspace = true, features = ["vulkan-swapchain"] }
+# The generic window-handle traits `vieww_hal::vulkan::VulkanDevice::for_window`
+# takes — `winit::window::Window` already implements them (winit 0.30 depends
+# on the same 0.6 generation), so this adds no new handle type, only the
+# trait names needed to write `for_window`'s bound.
+raw-window-handle = "0.6"
+vieww-render.workspace = true
+# Assets: the platform crate is where a bundle gets pointed at the right place
+# on each target, and it is the only crate that knows what that place is.
+vieww-asset.workspace = true
+
+winit = "0.30"
+
+# The accessibility bridge. Purpose-built for exactly this problem — turning a
+# custom-rendered tree into the native APIs behind VoiceOver, TalkBack, NVDA and
+# Orca — and explicitly on DESIGN §9's "do not attempt from scratch" list.
+# Reading the machine's language. Already in the tree through cosmic-text, so
+# this names an existing dependency rather than adding one.
+sys-locale = "0.3"
+
+accesskit = "0.24"
+accesskit_winit = "0.33"
+
+# A facade, and on every platform but one it is a no-op that an application can
+# switch on if it wants to. On Android it is the only way out: stderr is
+# discarded there, so `crash::LogSink` is what turns a panic into something
+# `adb logcat` — or a crash-collection SDK — can see. It is a normal dependency
+# rather than an Android-only one for exactly that reason: the *sink* has to
+# exist on every target or an application's setup code needs a `cfg` around it.
+log = "0.4"
+
+# The desktop pasteboard. Named per-target rather than unconditionally because
+# it pulls X11 and Wayland clients on Linux, none of which exists on a phone —
+# and the mobile targets have their own pasteboard APIs anyway, so an
+# unconditional dependency would only be dead weight in the two builds that
+# actually ship.
+#
+# A dependency rather than hand-written: the pasteboard is four unrelated APIs
+# behind one name, and on X11 it is not even an API but a protocol with an
+# ownership model — the clipboard belongs to a live client and vanishes when it
+# exits. That is DESIGN §9's "do not attempt from scratch" exactly.
+# The three desktop capabilities that live outside the window: a tray icon and a
+# machine-wide hotkey. Optional, and **off by default**, for one reason that is
+# specific to Linux: `tray-icon` reaches the status area through libappindicator,
+# which is GTK, and a framework whose whole position is that it needs no toolkit
+# must not acquire one for a feature most applications never ask for. An
+# application that wants a tray opts in and accepts that cost on Linux; every
+# other build is unchanged.
+#
+# Dependencies rather than hand-written, on the rule `arboard` above is here for
+# and that `docs/DESIGN.md` §9 states: a tray icon is `Shell_NotifyIconW`, an
+# `NSStatusItem` and a StatusNotifierItem over D-Bus, which is three unrelated
+# APIs behind one name — and the third is a *protocol* with a registration
+# handshake rather than a function to call.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+arboard = "3"
+tray-icon = { version = "0.19", optional = true }
+global-hotkey = { version = "0.6", optional = true }
+# `muda` is deliberately **not** named here. `tray-icon` re-exports it as
+# `tray_icon::menu`, and `TrayIcon::set_menu` takes a `dyn ContextMenu` from
+# *its* copy — so a second requirement of our own is a chance for cargo to
+# resolve two `muda`s, and the symptom of that is `muda::Menu` failing to
+# implement `ContextMenu` because it is a different `muda::Menu`. See the alias
+# at the top of `src/desktop.rs`.
+
+# Linux only, and only for the tray. libappindicator — which is how anything
+# reaches the modern Linux status area — needs a GTK main loop running somewhere
+# in the process, and winit's is not one and cannot be made into one. So the tray
+# runs on a thread of its own and this is what drives it. See `src/desktop.rs`.
+#
+# **This version has to match the one `tray-icon` was built against.** GTK's Rust
+# bindings are not semver-compatible across their own major versions, and a
+# mismatch here does not read as a version problem: it shows up as
+# `gtk::Window` being a different type from `gtk::Window`.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", optional = true }
+
+# winit refuses to compile for Android without being told which activity type to
+# build against — there is no default, because picking one wrong produces an app
+# that launches to a black screen rather than a compile error. `NativeActivity`
+# is the one that needs no Java of our own.
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30", features = ["android-native-activity"] }
+
+# Android discards stdout and stderr. Without a logger a panic is an app that
+# vanishes leaving an empty logcat, which is the single most expensive way to
+# debug a phone.
+android_logger = "0.14"
+
+# Window insets are not in `android-activity`'s API and `NativeActivity`'s
+# content rect is the whole window, so the only source of a display cutout is
+# the JVM. Pinned to the version already in the tree via `ndk`: a second copy
+# would give us a `JavaVM` type that looks identical and is not.
+jni = "0.22"
+
+# The screen reader bridge, driven directly rather than through
+# `accesskit_winit`'s Android arm.
+#
+# That arm exists in 0.33.2 and is unusable here: it finds the view by reading a
+# `mSurfaceView` field off `com.google.androidgamesdk.GameActivity`, which a
+# `NativeActivity` does not have, and unwraps the result. Enabling the
+# `accesskit_winit/accesskit_android` feature would therefore not bridge
+# accessibility — it would abort on launch. See `src/a11y_android.rs`.
+#
+# `embedded-dex` is what makes this reachable from `cargo apk`: the injected
+# `Delegate` class is loaded from a `classes.dex` inside the crate, so nothing
+# needs Gradle, an AAR, or a Java source set of our own — which is the same
+# property that made `NativeActivity` the right choice in the first place.
+#
+# **This brings a second `jni` into the binary**, 0.21 against the 0.22 above,
+# for exactly the reason that comment warns about. It is safe only because the
+# two never exchange a value: `a11y_android.rs` imports its JNI types from
+# `accesskit_android::jni` and nothing else does.
+accesskit_android = { version = "0.7.5", features = ["embedded-dex"] }
+
+# The safe area and the keyboard are `UIView` properties, and `winit` has no
+# accessor for either — so the only way to them is a message send. `objc2`
+# rather than a hand-written `objc_msgSend`, because how a 32-byte struct comes
+# back from one is ABI-dependent and getting it wrong compiles cleanly and reads
+# garbage; see `src/ios.rs`. Pinned to what `winit` already resolves for this
+# target, for the same reason `jni` is pinned to `ndk`'s copy: a second version
+# is a second, incompatible `UIView` type.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.5"
+objc2-ui-kit = { version = "0.2", features = [
+    "UIResponder",
+    "UIView",
+    "UIGeometry",
+    "UILayoutGuide",
+    "UITrackingLayoutGuide",
+    "UIKeyboardLayoutGuide",
+    # The pasteboard. `objc2-ui-kit` gates every class behind its own feature,
+    # so an omitted one is an unresolved import rather than a link error.
+    "UIPasteboard",
+] }
+
+# `NSString`, for handing text to `UIPasteboard`. This was a *dev*-dependency —
+# `examples/shared/device_tests.rs` uses it for `NSLog` — and the library now
+# needs it too, so it is named in both places. Same version, so no second copy.
+objc2-foundation = { version = "0.2", features = ["NSString"] }
+
+# Android does not call `main`: the activity loads a shared library and calls
+# `android_main` inside it, so the entry point has to be a cdylib. A plain
+# example would be built as an executable that nothing on the device can start.
+[[example]]
+name = "android"
+crate-type = ["cdylib"]
+
+# Read by `cargo apk`, ignored by every other build.
+[package.metadata.android]
+package = "dev.vieww.demo"
+build_targets = ["aarch64-linux-android"]
+# `apk_name` is what lands in target/debug/apk, not what the launcher shows.
+apk_name = "vieww"
+
+[package.metadata.android.sdk]
+# 24 is what `ci/mobile/adb-runner.sh` and the NDK linker name already target, so the
+# APK and the test binaries are built against the same floor.
+min_sdk_version = 24
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "vieww"
+# cargo-apk's default theme brings an ActionBar — 154px of chrome that this app
+# draws straight over, so it is invisible and purely wasteful. Found by reading
+# the accessibility tree (`adb exec-out uiautomator dump`), which showed an
+# `action_bar_container` nobody had asked for.
+theme = "@android:style/Theme.DeviceDefault.NoActionBar"
+# vello needs a GPU surface, and a phone that decides this activity can be
+# resized mid-frame is a surface lost at an arbitrary moment. It survives that —
+# `suspended` drops the surface and `resumed` rebuilds it — but the first frame
+# on a phone should not be debugging two things at once.
+[package.metadata.android.application.activity]
+orientation = "portrait"
+# Handle these ourselves rather than being restarted for them. The lifecycle
+# this crate implements already covers a lost surface; an activity recreated
+# behind its back would throw away the element tree instead.
+config_changes = "orientation|screenSize|smallestScreenSize|keyboardHidden|screenLayout|density"
+
+# For `NSLog` in `examples/shared/device_tests.rs`. Already in the lockfile at
+# 0.2.2 via `objc2-ui-kit`, so this costs no new download — it only makes the
+# crate nameable from the examples, which is where the device suite lives.
+[target.'cfg(target_os = "ios")'.dev-dependencies]
+objc2-foundation = { version = "0.2", features = ["NSString"] }
+
+# For the W^X probe in `examples/android.rs` — whether this process may `dlopen`
+# out of its own writable directory, which is the whole Android hot-reload
+# question.
+#
+# **`vieww-reload` is the more faithful probe and is deliberately not used.** It
+# enables `vieww-widget/hot-reload`, cargo unifies features across a build, and
+# the demo would then run a `WidgetNode` with an extra field and reconciliation
+# by type path — a different application from the one every other check in the
+# suite reports on. Depending on the linker directly keeps the measurement and
+# the thing measured apart.
+[target.'cfg(target_os = "android")'.dev-dependencies]
+libloading = "0.8"
+
+[dev-dependencies]
+# `tests/wait_loop.rs` opens a real window, so it has to be able to ask whether
+# there is one to open. A dev-dependency rather than a dependency: nothing that
+# ships needs to probe the machine, and this is the crate that would otherwise
+# carry the probe into every application built on it.
+vieww-hardware = { workspace = true, features = ["gpu"] }
+vieww-widget.workspace = true
+vieww-element.workspace = true
+vieww-animation.workspace = true
+# For `ScrollPhysics`, which `examples/grid.rs` hands to a `ScrollController`.
+# Already here transitively through `vieww-element`; named so the example can
+# use the real scrolling path rather than clamping an offset by hand, which is
+# not what an application should copy out of an example.
+vieww-gestures.workspace = true
+
+[lints]
+workspace = true
+
+# `tests/wait_loop.rs` opens a real window, and winit will not build an event
+# loop off the main thread — which is where Rust's test harness puts every
+# `#[test]`. Without `harness = false` the file cannot do the one thing it
+# exists to do. See its module docs for why the `any_thread` escape hatch was
+# not taken instead.
+[[test]]
+name = "wait_loop"
+harness = false

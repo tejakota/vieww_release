@@ -1,0 +1,35 @@
+[package]
+name = "vieww-platform"
+description = "Platform service traits: clipboard, notifications, sharing, deep links, URLs and storage, with recording implementations for tests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Deliberately none. This crate is trait definitions plus a registry and a
+# recorder; every dependency here would be a dependency of every consumer,
+# and the whole point of the trait boundary is that the FFI lives on the
+# other side of it in the per-platform crates.
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# System clipboard through the `arboard` crate.
+#
+# `services/desktop.rs` is full of `#[cfg(feature = "arboard")]`, and without
+# this declaration every one of them was silently always-false: the desktop
+# clipboard could never be compiled in, and the `cfg` read as if it could.
+# Declared so the gate names something real. Turning it on additionally needs
+# the optional dependency, which is deliberately not added here — this crate
+# is trait definitions plus a recorder, and taking a real dependency is the
+# per-platform crate's job.
+arboard = []
+# Opening URLs through the `open` crate. Same reasoning as `arboard`.
+open = []
+

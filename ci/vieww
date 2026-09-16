@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+#
+# The one entry point for every check, certification and release script.
+#
+#   ci/vieww                  # list commands
+#   ci/vieww <command> [args] # run one
+#
+# The scripts live in ci/<type>/ (check, certify, release, mobile, tools) and
+# can still be run directly; this file only gives them one discoverable name.
+# See ci/README.md for what each one proves and docs/release/ for the
+# checklist that uses them.
+
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Lean builds for every command (no debuginfo, no incremental caches): what
+# keeps a full gate within ~30 GB instead of ~100. VIEWW_FULL_DEBUG=1 opts out.
+# shellcheck source=ci/lib/lean.sh
+. "$here/lib/lean.sh"
+vieww_lean_env
+
+usage() {
+	cat <<'EOF'
+usage: ci/vieww <command> [args...]
+
+release (start here)
+  gate [--mode cpu|gpu] [--skip-package] [--hidpi] [--multi-monitor] [--against SHOTS]
+                     THE release script: runs every script below for this OS and
+                     writes a checked CHECKLIST.md + evidence
+  checklist RUN... [-o FILE]
+                     combine gate runs from every machine into one checked checklist
+  artifacts [...]    build installers (packaging/package.sh --installers) + SHA256SUMS + manifest
+  sums DIR...        merge per-OS SHA256SUMS files into one for upload
+  package-source     write the clean source archive
+
+check (fast, deterministic)
+  checks [--quick]   fmt, clippy, check, docs, MSRV, deny, tests, fixtures, packaging
+  platform [os]      does it compile for linux|macos|windows|ios|android|web here
+  clean              fail on patch leftovers, stale evidence, local paths
+  wasm               web target build check
+  coverage           line coverage (needs cargo-llvm-cov)
+  size               binary size budget
+
+certify (evidence on a real machine)
+  certify [OUT]      every suite, one verdict (Linux/macOS; Windows: pwsh ci/certify/certify-windows.ps1)
+  studio [--quick]   Studio release_check + tour + walkthrough, screenshot gallery
+  desktop [...]      real-window desktop suite (--expect-hidpi, --expect-multi-monitor)
+  shots [...]        screenshot every feature example; --against DIR to diff machines
+
+environment
+  VIEWW_FULL_DEBUG=1       keep debuginfo and incremental caches (much more disk)
+
+mobile / tools
+  mobile <script> [args]   run ci/mobile/<script>.sh (apk, device-suite, ios-app, ...)
+  tool <script> [args]     run ci/tools/<script> (patch-winit.sh, subset-fonts.py)
+EOF
+}
+
+cmd="${1:-}"
+[[ -n "$cmd" ]] || { usage; exit 0; }
+shift
+
+case "$cmd" in
+gate) exec bash "$here/release/gate.sh" "$@" ;;
+checklist)
+	py=$(command -v python3 || command -v python) || { echo "ci/vieww: python is required" >&2; exit 2; }
+	exec "$py" "$here/release/fill-checklist.py" "$@"
+	;;
+artifacts) exec bash "$here/release/artifacts.sh" "$@" ;;
+sums) exec bash "$here/release/artifacts.sh" --merge "$@" ;;
+package-source) exec bash "$here/release/package-source.sh" "$@" ;;
+checks) exec bash "$here/check/checks.sh" "$@" ;;
+platform) exec bash "$here/check/platform-check.sh" "$@" ;;
+clean) exec bash "$here/check/release-clean-check.sh" "$@" ;;
+wasm) exec bash "$here/check/wasm-check.sh" "$@" ;;
+coverage) exec bash "$here/check/coverage.sh" "$@" ;;
+size) exec bash "$here/check/size-budget.sh" "$@" ;;
+certify)
+	case "$(uname -s)" in
+	MINGW* | MSYS* | CYGWIN*)
+		ps=$(command -v pwsh || command -v powershell.exe)
+		exec "$ps" -NoProfile -ExecutionPolicy Bypass -File "$here/certify/certify-windows.ps1" "$@"
+		;;
+	*) exec bash "$here/certify/certify.sh" "$@" ;;
+	esac
+	;;
+studio) exec bash "$here/certify/release-check.sh" "$@" ;;
+desktop) exec bash "$here/certify/desktop-suite.sh" "$@" ;;
+shots) exec bash "$here/certify/shot-suite.sh" "$@" ;;
+mobile)
+	script="${1:?ci/vieww mobile <script>}"
+	shift
+	exec bash "$here/mobile/${script%.sh}.sh" "$@"
+	;;
+tool)
+	script="${1:?ci/vieww tool <script>}"
+	shift
+	case "$script" in
+	*.py) exec python3 "$here/tools/$script" "$@" ;;
+	*) exec bash "$here/tools/${script%.sh}.sh" "$@" ;;
+	esac
+	;;
+-h | --help | help) usage ;;
+*)
+	echo "ci/vieww: unknown command '$cmd'" >&2
+	usage >&2
+	exit 2
+	;;
+esac

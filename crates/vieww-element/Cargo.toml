@@ -1,0 +1,26 @@
+[package]
+name = "vieww-element"
+description = "The vieww element tree: persistent identity, state and the rebuild scheduler."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+hot-reload = ["vieww-widget/hot-reload"]
+
+[dependencies]
+# `Animation` is the join between the two: a controller from the animation
+# layer, publishing into a signal from this one.
+vieww-animation.workspace = true
+vieww-foundation.workspace = true
+# `ScrollController` is the same kind of join as `Animation`: the physics come
+# from the gesture layer, the offset is published into a signal from this one.
+vieww-gestures.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

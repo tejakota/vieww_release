@@ -1,0 +1,28 @@
+[package]
+name = "vieww-image"
+description = "Image capabilities past decode-and-display: mipmap chains, texture atlas packing, animated-image frame sequencing, colour-profile awareness, and a residency-budgeted decoded-image cache — the pieces GPU upload and long-running apps need that a decode-on-demand asset cache does not provide on its own."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# Decode stays exactly where `vieww-asset` already does it well (path/bundle
+# resolution, an `image`-crate-backed `decode`/`decode_sized`, an
+# identity-preserving `ImageCache`) — this crate does not re-decode. It reads
+# `image`'s own `AnimationDecoder`/frame API directly for the one decode-time
+# capability `vieww-asset` does not have a use for yet (animated-image frame
+# timing), and otherwise operates on already-decoded `vieww_foundation::Image`
+# pixels.
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "gif"]
+
+[lints]
+workspace = true

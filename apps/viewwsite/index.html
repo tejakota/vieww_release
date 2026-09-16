@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>viewwstudio — a UI framework in Rust</title>
+<meta name="description" content="vieww follows three-tree architecture — Widget → Element → RenderObject — with a renderer that goes all the way down to the pixels. viewwstudio is the desktop editor and device-framed preview for the screens you write.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="viewwstudio — a UI framework in Rust">
+<meta property="og:description" content="Widget → Element → RenderObject, with a renderer that goes all the way down to the pixels.">
+<meta property="og:image" content="og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="og.png">
+<meta name="theme-color" content="#0F0D0B">
+<!--
+	The repository every download link points at. The page reads this tag at
+	start-up; `build-site.sh` writes it from `VIEWW_REPO`. Changing it
+	afterwards is an edit to this file — no Rust toolchain and no rebuild.
+-->
+<meta name="vieww-repo" content="__REPO__">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2314161A'/%3E%3Crect x='16' y='20' width='40' height='60' rx='8' fill='%23464E5E'/%3E%3Crect x='44' y='32' width='40' height='48' rx='8' fill='%237E5CE8'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/Geist-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="fonts/Geist-Bold.ttf" as="font" type="font/ttf" crossorigin>
+
+<style>
+	/*
+		The stylesheet is the half of this page a rasteriser cannot do:
+		`backdrop-filter`, which needs the pixels already composited behind a
+		box; `background-clip: text`, which needs glyph coverage as a mask;
+		`:hover` and `:focus-visible`, which are states no widget tree holds;
+		scroll-driven animation the browser runs without waking this
+		application at all.
+
+		Everything else — the structure, the spacing, the type scale, the
+		colours — comes from the vieww tree in `src/dom.rs`, through
+		`vieww-platform-web-dom`.
+	*/
+
+	/* SIL Open Font Licence 1.1. Subset to the characters this page draws, and
+	   served as files rather than compiled into the WebAssembly: the browser
+	   caches them separately, and the wasm is smaller for it. */
+	@font-face { font-family: 'Geist'; src: url('fonts/Geist-Regular.ttf') format('truetype');
+	             font-weight: 400; font-display: swap; }
+	@font-face { font-family: 'Geist'; src: url('fonts/Geist-Medium.ttf') format('truetype');
+	             font-weight: 500; font-display: swap; }
+	@font-face { font-family: 'Geist'; src: url('fonts/Geist-Bold.ttf') format('truetype');
+	             font-weight: 600 700; font-display: swap; }
+	@font-face { font-family: 'Geist Mono'; src: url('fonts/GeistMono-Regular.ttf') format('truetype');
+	             font-weight: 400; font-display: swap; }
+	@font-face { font-family: 'Geist Mono'; src: url('fonts/GeistMono-Medium.ttf') format('truetype');
+	             font-weight: 500 700; font-display: swap; }
+
+	:root {
+		color-scheme: dark;
+		--ground: #0F0D0B;
+		--ink: #F8F4F2;
+		--ink-2: #A69C95;
+		--ink-3: #78716B;
+		--accent: #B491FF;
+		--accent-deep: #7E5CE8;
+		--line: rgba(255,255,255,0.09);
+		/* One easing for the whole page. Motion that all decelerates the same
+		   way is most of what reads as "fluid" rather than "animated". */
+		--ease: cubic-bezier(0.22, 1, 0.36, 1);
+		--ease-spring: cubic-bezier(0.34, 1.4, 0.44, 1);
+	}
+
+	* { box-sizing: border-box; }
+	html {
+		scroll-behavior: smooth;
+		/* **Do not let the browser resize the type.**
+		
+		   iOS Safari inflates text in any block it judges too wide for the
+		   viewport — its "font boosting" heuristic, on by default and reported
+		   as `text-size-adjust: auto`. The code samples are `white-space: pre`
+		   lines inside a horizontal scroller, so their long lines are exactly
+		   what it targets: on a phone, line 3 and lines 14-16 of `screen.rs`
+		   came out half again as large as the lines around them, in the middle
+		   of a block whose whole point is that it is set in one size.
+		
+		   `100%` means "render it at the size I asked for". It is not a
+		   zoom lock — pinch-zoom and the OS text-size setting both still
+		   work — it only refuses the automatic inflation. */
+		-webkit-text-size-adjust: 100%;
+		        text-size-adjust: 100%;
+	}
+	body {
+		margin: 0;
+		background: var(--ground);
+		color: var(--ink);
+		font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+		-webkit-font-smoothing: antialiased;
+		text-rendering: optimizeLegibility;
+		overflow-x: hidden;
+	}
+	a { color: inherit; }
+	h1, h2, h3, p, figure { margin: 0; }
+	::selection { background: rgba(180, 145, 255, 0.30); color: #fff; }
+
+	/* Keyboard users get a ring; mouse users never see one. */
+	:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 3px;
+		border-radius: 6px;
+	}
+
+	/* ── the splash ─────────────────────────────────────────────────────
+	   Covers the boot, so nobody sees the fallback content swap for the
+	   built page. The mark assembles from its two panels — they arrive from
+	   opposite sides, which is the shape the logo is *made* of — then the
+	   whole thing dissolves upward and the hero rises underneath.
+
+	   Held until the page is actually built (`.done` is added from the
+	   module below), so on a slow connection it waits rather than blinking. */
+	#vw-splash {
+		position: fixed; inset: 0; z-index: 200;
+		background: var(--ground);
+		transition: opacity .42s var(--ease), transform .42s var(--ease),
+		            visibility 0s linear .42s;
+	}
+	/* The exit `splash.rs` uses: eighteen points up and 1.04 out over 420 ms,
+	   so the mark moves *off* toward the viewer and the page is uncovered
+	   behind it rather than emerging through it. */
+	/* A fade, and no transform. `splash.rs` lifts and swells because what is
+	   behind it there is a whole editor appearing; here the mark is already
+	   standing in its final position, so moving it on the way out would undo
+	   the match. */
+	#vw-splash.done { opacity: 0; visibility: hidden; }
+	/* `apps/viewwstudio/src/ui/brand.rs` at **84 points, in the hero's own
+	   position** — `64px` of nav plus the hero's `padding-top`, centred.
+
+	   That is the whole point of the number: the splash mark and the page mark
+	   are the same size in the same place, so the dismissal is a match cut. The
+	   veil fades and the mark does not move. A centred splash mark that jumped
+	   to the top of the page on dismissal was the mismatch. */
+	#vw-splash .glyph {
+		position: absolute; left: 50%; margin-left: -42px;
+		top: calc(64px + clamp(56px, 11vw, 104px));
+		width: 84px; height: 84px; border-radius: 18.48px;
+		background: linear-gradient(180deg, #24272E, #14161A);
+		box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10), 0 4px 12px rgba(0,0,0,0.51);
+		animation: vw-glyph-in .42s var(--ease) both;
+	}
+	/* The same bloom the page's mark carries, so that does not pop either. */
+	#vw-splash .glyph::marker { content: none; }
+	#vw-splash .glow {
+		position: absolute; left: 50%; margin-left: -68px;
+		top: calc(64px + clamp(56px, 11vw, 104px) - 26px);
+		width: 136px; height: 136px; border-radius: 999px;
+		background: rgba(180,145,255,0.30); filter: blur(30px);
+		animation: vw-bloom .8s .1s var(--ease) both;
+	}
+	#vw-splash .glyph::before, #vw-splash .glyph::after {
+		content: ''; position: absolute; border-radius: 6.72px; transform-origin: center;
+	}
+	/* The editor panel, flat: 0.16, 0.20, 0.40 x 0.60 of 84. */
+	#vw-splash .glyph::before {
+		left: 13.44px; top: 16.8px; width: 33.6px; height: 50.4px;
+		background: #464E5E;
+		animation: vw-panel .44s .18s var(--ease) both;
+	}
+	/* The preview panel, on top, with the accent ramp: 0.44, 0.32, 0.40 x 0.48. */
+	#vw-splash .glyph::after {
+		left: 36.96px; top: 26.88px; width: 33.6px; height: 40.32px;
+		background: linear-gradient(180deg, #B491FF, #7E5CE8);
+		box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+		animation: vw-panel .46s .32s var(--ease) both;
+	}
+	/* The wordmark sits where the status pill will be, and hands over to it. */
+	#vw-splash .word {
+		position: absolute; left: 0; right: 0; text-align: center;
+		top: calc(64px + clamp(56px, 11vw, 104px) + 108px);
+		font: 500 11.5px/1 'Geist Mono', ui-monospace, monospace;
+		letter-spacing: .34em; text-indent: .34em; color: var(--ink-3);
+		animation: vw-word .38s .52s var(--ease) both;
+	}
+	/* The mark grows from 0.78, the panels from nothing about their own centres
+	   — `splash.rs`'s `grown` and `panel`, with its reveal windows in ms:
+	   mark 0-420, editor 180-620, preview 320-780, wordmark 520-900. */
+	@keyframes vw-glyph-in {
+		from { opacity: 0; transform: scale(.78); }
+		to   { opacity: 1; transform: none; }
+	}
+	@keyframes vw-panel {
+		from { opacity: 0; transform: scale(0); }
+		to   { opacity: 1; transform: none; }
+	}
+	@keyframes vw-word { from { opacity: 0; letter-spacing: .5em; } to { opacity: 1; } }
+	@keyframes vw-bloom { from { opacity: 0; transform: scale(.7); } to { opacity: 1; } }
+
+	/* ── the hero's staged arrival ──────────────────────────────────────
+	   One shape, eight delays. The page settles from the mark outward,
+	   which is the same order the splash assembled in. */
+	.vw-rise { animation: vw-rise-in .8s var(--ease) both; }
+	.vw-d0 { animation-delay: .05s } .vw-d1 { animation-delay: .12s }
+	.vw-d2 { animation-delay: .19s } .vw-d3 { animation-delay: .25s }
+	.vw-d4 { animation-delay: .32s } .vw-d5 { animation-delay: .39s }
+	.vw-d6 { animation-delay: .47s }
+	@keyframes vw-rise-in {
+		from { opacity: 0; transform: translateY(20px); filter: blur(6px); }
+		to   { opacity: 1; transform: none; filter: none; }
+	}
+
+	/* The mark's own panels drift very slightly, forever. Two seconds of
+	   travel over eleven, which reads as alive rather than as animation. */
+	.vw-markglow .vw-mark-a { animation: vw-drift-a 11s ease-in-out infinite; }
+	.vw-markglow .vw-mark-b { animation: vw-drift-b 11s ease-in-out infinite; }
+	@keyframes vw-drift-a { 50% { transform: translate(-1.5px, 1px); } }
+	@keyframes vw-drift-b { 50% { transform: translate(1.5px, -1px); } }
+
+	/* The lit backdrop behind the hero.
+
+	   One layer: a glow centred on the mark, and nothing else. */
+	.vw-hero-glow {
+		background:
+			radial-gradient(52% 46% at 50% 24%, rgba(180,145,255,0.24) 0%, transparent 72%);
+	}
+	.vw-gradient-text, .vw-gradient-text * {
+		background: linear-gradient(180deg, #F8F4F2 0%, var(--accent) 100%);
+		-webkit-background-clip: text; background-clip: text;
+		-webkit-text-fill-color: transparent; color: transparent;
+	}
+	.vw-h1 { margin: 0 !important; }
+
+	/* The mark's rim: `brand.rs` fills a rounded ring one point inside the
+	   body's edge rather than stroking a border, so the panels' fractions
+	   still measure from the body. An inset shadow is the CSS with the same
+	   property — ink on the edge, nothing taken out of the box. */
+	.vw-mark { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10); }
+
+	.vw-markglow { position: relative; }
+	.vw-markglow::before {
+		content: ''; position: absolute; inset: -26px; border-radius: 999px; z-index: -1;
+		background: rgba(180,145,255,0.30); filter: blur(30px);
+		animation: vw-breathe 7s ease-in-out infinite;
+	}
+	@keyframes vw-breathe { 50% { opacity: .6; transform: scale(1.08); } }
+
+	.vw-live { animation: vw-pulse 2.4s infinite; }
+	@keyframes vw-pulse {
+		0%   { box-shadow: 0 0 0 0 rgba(78,190,125,0.65); }
+		70%  { box-shadow: 0 0 0 7px rgba(78,190,125,0); }
+		100% { box-shadow: 0 0 0 0 rgba(78,190,125,0); }
+	}
+
+	/* Scroll-driven reveal. No observer, no listener, no per-frame work. */
+	.vw-reveal { opacity: 1; }
+	@supports (animation-timeline: view()) {
+		.vw-reveal {
+			animation: vw-rise-in linear both;
+			animation-timeline: view();
+			animation-range: entry 0% entry 46%;
+		}
+	}
+
+	/* ── the nav ───────────────────────────────────────────────────────── */
+	.vw-nav {
+		position: sticky; top: 0; z-index: 50;
+		border-bottom: 1px solid transparent;
+		background: rgba(15,13,11,0);
+		transition: background .3s var(--ease), border-color .3s var(--ease),
+		            backdrop-filter .3s var(--ease);
+	}
+	.vw-nav.stuck {
+		border-bottom-color: rgba(255,255,255,0.08);
+		background: rgba(15,13,11,0.72);
+		backdrop-filter: blur(18px) saturate(160%);
+		-webkit-backdrop-filter: blur(18px) saturate(160%);
+	}
+	.vw-navlink {
+		text-decoration: none; position: relative;
+		transition: color .2s var(--ease);
+	}
+	.vw-navlink::after {
+		content: ''; position: absolute; left: 0; right: 0; bottom: -7px; height: 1.5px;
+		background: var(--accent); border-radius: 2px;
+		transform: scaleX(0); transform-origin: left;
+		transition: transform .28s var(--ease);
+	}
+	.vw-navlink:hover, .vw-navlink:hover *,
+	.vw-navlink.active, .vw-navlink.active * { color: var(--ink) !important; }
+	.vw-navlink:hover::after, .vw-navlink.active::after { transform: scaleX(1); }
+
+	.vw-btn {
+		transition: transform .25s var(--ease-spring), box-shadow .25s var(--ease),
+		            background .2s var(--ease);
+	}
+	.vw-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(126,92,232,0.45); }
+	.vw-btn:active { transform: translateY(0) scale(.985); }
+
+	/* ── surfaces ──────────────────────────────────────────────────────── */
+	.vw-card, .vw-window, .vw-code, .vw-term, .vw-closing {
+		position: relative; overflow: hidden;
+		border: 1px solid var(--line);
+		border-radius: 16px;
+		background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 14px 34px rgba(0,0,0,0.30);
+	}
+	.vw-card { transition: border-color .25s var(--ease), transform .25s var(--ease), box-shadow .25s var(--ease); }
+	.vw-card:hover {
+		border-color: rgba(180,145,255,0.32);
+		transform: translateY(-3px);
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 22px 50px rgba(0,0,0,0.40);
+	}
+	.vw-card::after {
+		content: ''; position: absolute; right: -30px; top: -30px;
+		width: 130px; height: 130px; border-radius: 999px;
+		background: rgba(180,145,255,0); filter: blur(32px);
+		transition: background .3s var(--ease); pointer-events: none;
+	}
+	.vw-card:hover::after { background: rgba(180,145,255,0.17); }
+
+	.vw-window { box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 40px 90px rgba(0,0,0,0.55); }
+	.vw-closing {
+		padding: 64px 32px;
+		background:
+			radial-gradient(70% 130% at 50% 0%, rgba(180,145,255,0.14) 0%, transparent 65%),
+			linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+	}
+
+	/* The phone bezel around the canvas island. */
+	.vw-phone {
+		border: 1px solid rgba(255,255,255,0.13); border-radius: 34px; padding: 10px;
+		background: #16120F;
+		box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 34px 80px rgba(0,0,0,0.6),
+		            0 0 0 1px rgba(180,145,255,0.10);
+	}
+
+	/* Code does not wrap. A long line scrolls its own block, which is what an
+	   editor does and what makes a sample readable as source rather than as
+	   prose that happens to be monospaced. */
+	.vw-code span { white-space: pre !important; }
+
+	/* **No ligatures in code.** Geist Mono draws `->` as a single arrow whose
+	   ink starts hard against the left edge of the first cell. In prose that
+	   is handsome; in `screen() -> impl Widget` it closes the space before the
+	   arrow while leaving the one after it, so the line reads `screen()-> impl`
+	   even though the space is there in the markup. Source is read token by
+	   token, and the characters that were typed are the ones that should be
+	   on screen. */
+	.vw-code, .vw-code *, .vw-term, .vw-term * { font-variant-ligatures: none; }
+
+	.vw-copy { transition: border-color .2s var(--ease), background .2s var(--ease); }
+	.vw-copy:hover { border-color: rgba(180,145,255,0.45); background: rgba(180,145,255,0.10); }
+
+	/* ── scale ──────────────────────────────────────────────────────────
+	   The tree sets one size per thing; this makes those sizes fluid. That
+	   division is the point of the DOM backend — structure and intent come
+	   from the widget tree, and "how big is it on *this* screen" is a
+	   question only the viewport can answer.
+
+	   `clamp()` rather than a breakpoint: a single `@media (max-width: 880px)`
+	   step meant a 72px headline became 42px the moment the window crossed a
+	   line, and every width either side of it was wrong by a different amount.
+	   These interpolate, so 320px, 390px, 768px and 1440px are all deliberate.
+
+	   `!important` throughout, and on the element *and* its descendants,
+	   because the size the tree chose arrives as an inline declaration. */
+	.vw-section {
+		padding-top: clamp(56px, 9vw, 120px);
+		padding-bottom: clamp(56px, 9vw, 120px);
+		scroll-margin-top: 64px;
+	}
+	.vw-hero {
+		position: relative; overflow: hidden;
+		padding-top: clamp(56px, 11vw, 104px);
+		padding-bottom: clamp(48px, 9vw, 88px);
+	}
+	.vw-h1, .vw-h1 * { font-size: clamp(33px, 7.4vw, 72px) !important; }
+	.vw-h2, .vw-h2 * { font-size: clamp(25px, 4.6vw, 44px) !important; }
+	.vw-lead, .vw-lead * { font-size: clamp(15px, 2.2vw, 18px) !important; }
+	.vw-lead-hero, .vw-lead-hero * { font-size: clamp(15.5px, 2.5vw, 20px) !important; }
+
+	/* `balance` on headings, `pretty` on prose. A three-word second line ending
+	   in a single orphaned word — "…one job / each." — is the most visible
+	   thing about a headline that scales, and it happens at a different width
+	   for every string. The browser knows the widths; let it break them. */
+	.vw-h1, .vw-h2, .vw-h1 *, .vw-h2 * { text-wrap: balance; }
+	.vw-lead, .vw-lead-hero, .vw-lead *, .vw-lead-hero * { text-wrap: pretty; }
+
+	/* The status pill carries a long claim. It may wrap on a narrow screen —
+	   it should not run off one, and what wraps should stay centred. */
+	.vw-pill > * { flex-wrap: wrap !important; justify-content: center !important; }
+	.vw-pill span { text-align: center !important; }
+
+	/* The stat strip. Two bugs lived here, and both are about a `Flex`'s
+	   inline declarations beating a class:
+
+	   `align-items:center` centred each cell in its grid row, so a cell whose
+	   note wrapped to four lines sat proud of one whose note wrapped to two —
+	   four numbers on four different baselines, in a box whose whole idea is
+	   a hairline grid. `stretch` is what a grid does by default and what this
+	   always wanted.
+
+	   And the numbers were a fixed 25px, which is a third of a 320px screen
+	   once "3 / 10" is on it — so the value wrapped mid-fraction and the cell
+	   grew again. Fluid, and never wrapping. */
+	.vw-stats { align-items: stretch !important; }
+	.vw-stat {
+		background: rgba(15,13,11,0.82);
+		backdrop-filter: blur(8px);
+		padding: clamp(14px, 3vw, 18px) 10px;
+		display: flex !important;
+	}
+	.vw-stat-v, .vw-stat-v * {
+		font-size: clamp(19px, 4.6vw, 25px) !important;
+		white-space: nowrap !important;
+	}
+	.vw-stat-u, .vw-stat-u * { font-size: clamp(10px, 2.2vw, 12px) !important; }
+	.vw-stat-n, .vw-stat-n * { font-size: clamp(10.5px, 2.4vw, 11.5px) !important; }
+
+	/* The island is 300 points wide and a 320-point phone is not. */
+	.vw-phone { max-width: 100%; }
+	.vw-phone canvas { max-width: 100%; height: auto; }
+
+	/* ── grids ─────────────────────────────────────────────────────────── */
+	/* `align-items:start` throughout: a grid stretches by default, so a short
+	   card next to a tall one grows to match and its content floats in the
+	   middle of the space. Top-aligned is what every one of these means.
+
+	   `!important` because the `Flex` these classes land on writes
+	   `align-items:stretch` *inline*, and an inline declaration beats a class
+	   — the same reason `display` needs it. */
+	.vw-grid2 { display: grid !important; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start !important; }
+	.vw-grid3 { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start !important; }
+	.vw-grid4 { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: start !important; }
+	.vw-stats { display: grid !important; grid-template-columns: repeat(4, 1fr); gap: 1px; }
+	.vw-start { display: grid !important; grid-template-columns: 1.15fr 1fr; gap: 20px;
+	            align-items: start !important; }
+	.vw-footgrid { display: grid !important; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 32px;
+	               align-items: start !important; }
+
+	/* The three architecture panels, joined by a hairline that reads as flow. */
+	.vw-grid3 .vw-tree { position: relative; }
+	@media (min-width: 881px) {
+		.vw-grid3 .vw-tree + .vw-tree::before {
+			content: ''; position: absolute; left: -17px; top: 42px;
+			width: 18px; height: 1px;
+			background: linear-gradient(90deg, transparent, rgba(180,145,255,0.55));
+		}
+	}
+
+	.vw-rows > * + * { border-top: 1px solid rgba(255,255,255,0.07); }
+	.vw-row { text-decoration: none; display: block; transition: background .18s var(--ease); }
+	.vw-row:hover { background: rgba(180,145,255,0.06); }
+	.vw-foot { text-decoration: none; transition: color .18s var(--ease); }
+	.vw-foot:hover, .vw-foot:hover * { color: var(--ink) !important; }
+
+	@media (max-width: 1080px) {
+		.vw-grid4 { grid-template-columns: 1fr 1fr; }
+		.vw-footgrid { grid-template-columns: 1fr 1fr; }
+	}
+	@media (max-width: 880px) {
+		.vw-grid2, .vw-grid3, .vw-start { grid-template-columns: 1fr; }
+		.vw-stats { grid-template-columns: 1fr 1fr; }
+		.vw-navlinks { display: none !important; }
+		.vw-cta { flex-direction: column !important; align-items: stretch !important; }
+		.vw-footbottom { flex-direction: column !important; gap: 10px; align-items: flex-start !important; }
+	}
+	@media (max-width: 560px) {
+		.vw-hero-bg { background-size: 100% 100%, 34px 34px, 34px 34px; }
+		.vw-grid4, .vw-footgrid { grid-template-columns: 1fr; }
+	}
+
+	/* Everything above is motion; this turns all of it off for anyone who
+	   asked the OS not to see it. The splash is skipped outright. */
+	@media (prefers-reduced-motion: reduce) {
+		html { scroll-behavior: auto; }
+		*, *::before, *::after {
+			animation-duration: .001ms !important;
+			animation-delay: 0s !important;
+			transition-duration: .001ms !important;
+		}
+		#vw-splash { display: none; }
+	}
+
+	#boot { padding: 110px 24px; text-align: center; color: #A69C95;
+	        font: 400 15px/1.65 ui-sans-serif, system-ui, sans-serif; }
+	#boot h1 { font-size: 26px; color: #F8F4F2; margin: 0 0 12px; }
+	#boot p { margin: 0 auto 8px; max-width: 640px; }
+</style>
+</head>
+<body>
+
+<div id="vw-splash" aria-hidden="true">
+	<div class="glow"></div>
+	<div class="glyph"></div>
+	<div class="word">VIEWW STUDIO</div>
+</div>
+
+<!--
+	The page is built into this element. Until the module arrives, this is what
+	a reader and a crawler see: the same claims, in plain HTML. The canvas
+	version could offer neither — a `<canvas>` is one opaque element to a
+	crawler and an empty one to a screen reader.
+-->
+<div id="app">
+	<div id="boot">
+		<h1>viewwstudio</h1>
+		<p><strong>A UI framework in Rust. Three trees, one job each.</strong></p>
+		<p>vieww follows three-tree architecture — Widget → Element → RenderObject — with a
+		   renderer that goes all the way down to the pixels. viewwstudio is the desktop editor
+		   and device-framed preview for the screens you write.</p>
+		<noscript><p>This page builds itself with WebAssembly, so it needs JavaScript enabled.</p></noscript>
+	</div>
+</div>
+
+<script type="module">
+	const splash = document.getElementById('vw-splash');
+	const boot = document.getElementById('boot');
+
+	// Dynamic `import()` rather than a static one: a static import is hoisted
+	// out of the try block and its failure cannot be caught, so a 404 on the
+	// module left the page sitting on its fallback with nothing in the console.
+	try {
+		const wasm = await import('./viewwsite.js');
+		await wasm.default();
+	} catch (error) {
+		if (boot) {
+			const line = document.createElement('p');
+			line.style.color = '#FF8F9A';
+			line.textContent = 'The page could not start: ' + error;
+			boot.append(line);
+		}
+		splash?.classList.add('done');
+		throw error;
+	}
+
+	// Hold the splash for the rest of its assembly, then dissolve. The page is
+	// already built underneath, so the hero's staged arrival runs into view
+	// rather than starting after a blank frame.
+	// `T_EXIT` in `splash.rs` begins at 1480 ms; the same beat here.
+	const MINIMUM = 1180;
+	setTimeout(() => splash?.classList.add('done'), Math.max(0, MINIMUM - performance.now()));
+
+	// Which section the reader is in. `rootMargin` puts the trigger line under
+	// the sticky bar, so the link lights up as its heading arrives rather than
+	// when the section's last pixel does.
+	const links = new Map(
+		[...document.querySelectorAll('.vw-navlink')].map(a => [a.getAttribute('href').slice(1), a])
+	);
+	const spy = new IntersectionObserver(entries => {
+		for (const entry of entries) {
+			if (!entry.isIntersecting) continue;
+			for (const a of links.values()) a.classList.remove('active');
+			links.get(entry.target.id)?.classList.add('active');
+		}
+	}, { rootMargin: '-64px 0px -70% 0px' });
+	for (const id of links.keys()) {
+		const section = document.getElementById(id);
+		if (section) spy.observe(section);
+	}
+
+	// The nav earns its blur only once there is something behind it.
+	const nav = document.querySelector('.vw-nav');
+	const onScroll = () => nav?.classList.toggle('stuck', window.scrollY > 8);
+	addEventListener('scroll', onScroll, { passive: true });
+	onScroll();
+
+	// Copy the install lines.
+	const copy = document.querySelector('.vw-copy');
+	copy?.addEventListener('click', async () => {
+		const lines = [...document.querySelectorAll('.vw-term .vw-cmd, .vw-term span')]
+			.map(n => n.textContent).filter(t => t && t.startsWith('sudo'));
+		try {
+			await navigator.clipboard.writeText(lines.join('\n'));
+			const label = copy.querySelector('span') ?? copy;
+			const was = label.textContent;
+			label.textContent = 'Copied';
+			setTimeout(() => { label.textContent = was; }, 1600);
+		} catch { /* clipboard denied; the text is selectable anyway */ }
+	});
+</script>
+
+</body>
+</html>

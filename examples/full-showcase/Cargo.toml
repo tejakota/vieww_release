@@ -1,0 +1,19 @@
+[package]
+name = "full-showcase"
+description = "The complete framework showcase: charts, colour picker, grid, carousel, morphing — rendered to PNG through vieww's own rasterizer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[lints]
+workspace = true

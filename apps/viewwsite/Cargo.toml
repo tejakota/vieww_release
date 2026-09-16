@@ -1,0 +1,53 @@
+[package]
+name = "viewwsite"
+description = "viewwstudio's product page: a vieww widget tree, rendered to DOM, with a canvas island."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# **Not published, and not a library.** It is one page, built for one target.
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The page itself builds everywhere. That is deliberate: `examples/render.rs`
+# rasterises the same tree to a PNG on the host, with no browser and no wasm
+# toolchain, which is how a layout change is reviewed in a second rather than in
+# a two-minute wasm build and a browser reload.
+[dependencies]
+vieww = { workspace = true }
+# For `decode`: the page's three screenshots are PNGs compiled into the binary
+# and decoded at start-up. `vieww-asset`'s codec is the same one the studio
+# loads assets through.
+vieww-asset = { workspace = true }
+# The DOM backend. Builds on every target — only its `DomApp` is wasm-gated —
+# so the page below can name `Styled`, `Tag` and `Canvas` unconditionally and
+# still rasterise on the host through `examples/render.rs`.
+vieww-platform-web-dom = { workspace = true }
+vieww-element = { workspace = true }
+
+# The browser half, and only it. On any other target this crate still builds —
+# it just has no `start` to call.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+vieww-platform-web = { workspace = true }
+
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+features = ["Location", "Navigator", "Window"]
+
+# `native` for the host renderer in `examples/render.rs`. The wasm build gets
+# it through `vieww-platform-web`, which cannot work without a rasteriser; this
+# is the same switch for the target that has no platform crate under it.
+[dev-dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-asset = { workspace = true }
+
+[lints]
+workspace = true

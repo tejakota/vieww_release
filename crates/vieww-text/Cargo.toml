@@ -1,0 +1,47 @@
+[package]
+name = "vieww-text"
+description = "The vieww text layer: font loading, shaping, line breaking and bidirectional paragraph layout."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# Shaping, line breaking, bidi and font fallback. Not optional, and not behind a
+# feature: text metrics decide layout *sizes*, so a build without a shaper would
+# disagree with a build with one about where every box goes. That is exactly what
+# docs/DESIGN.md §11 forbids a feature from doing.
+cosmic-text = "0.19"
+
+# For the character-map lookup behind `FontStore::can_render`. Already in the
+# tree — `cosmic-text` pulls it in through `fontdb` — so this names a dependency
+# that was being compiled anyway rather than adding one. Named explicitly
+# because relying on a transitive dependency's version is how a build breaks on
+# somebody else's patch release.
+ttf-parser = "0.25"
+
+[lints]
+workspace = true
+
+# No `[features]`.
+#
+# There was one — `harfbuzz`, gating an optional `rustybuzz` dependency behind
+# `shaping::HarfBuzzShaper`. Both are gone with the `shaping` module (see the
+# crate doc), and the feature's own description is why it should not come back
+# in that shape: it said the default build served "the naive shaper's
+# English-UI-text case" and that turning the feature on bought "full Unicode
+# shaping".
+#
+# Neither half was true of any build this workspace ever produced. `Paragraph`
+# — the only path a widget reaches — shapes with `cosmic-text`, which shapes
+# with `harfrust`, a HarfBuzz port. Full Unicode shaping was always on, in
+# every build, and the feature bought a second shaper that nothing called. A
+# feature flag that appears to control text correctness and does not is worse
+# than no flag: it invites an application to turn it on for safety and pay a
+# dependency for nothing, and invites a reader to conclude the default build
+# cannot shape Arabic.

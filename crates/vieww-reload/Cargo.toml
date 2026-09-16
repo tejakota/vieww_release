@@ -1,0 +1,30 @@
+[package]
+name = "vieww-reload"
+description = "Development-time hot reload for vieww: load an application's widgets from a library and swap it while the app runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# **The feature is enabled here, not left to the host and guest to agree on.**
+#
+# Reload identity adds a field to `WidgetNode` under `hot-reload`, so a host
+# built without it and a guest built with it disagree about that type's layout —
+# and the host would read a 3-word struct as a 2-word one on the first reload.
+#
+# Cargo does not save anyone here: `cargo build -p guest` and `cargo run -p host`
+# are separate invocations and resolver 2 unifies features *within* a build, not
+# across two. Both halves depend on this crate, so enabling it here is what makes
+# the layouts agree by construction rather than by everybody remembering.
+vieww-widget = { workspace = true, features = ["hot-reload"] }
+
+# Already in the tree through wgpu, so this adds no new external surface. The
+# only thing it is used for is `dlopen`/`dlsym`; everything else here is std.
+libloading = "0.8"
+
+[lints]
+workspace = true

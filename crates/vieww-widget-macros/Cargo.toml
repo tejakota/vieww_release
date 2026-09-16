@@ -1,0 +1,24 @@
+[package]
+name = "vieww-widget-macros"
+description = "The #[widget] attribute: writes the Widget impl's mechanical half — debug_name, kind, and the WidgetNode conversion — so a composed widget is a struct and a build method, the way it reads in the head."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# The same triple `vieww-plugin-macros` already established as this
+# workspace's proc-macro dependency set — see that crate's manifest for the
+# reasoning, which applies here unchanged.
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

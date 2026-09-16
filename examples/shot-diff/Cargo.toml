@@ -1,0 +1,25 @@
+[package]
+name = "shot-diff"
+description = "Compares two directories of VIEWW_SHOT output, pixel for pixel, and says whether two machines drew the same frames."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Decode stays where the workspace already does it. `vieww_asset::decode`
+# hands back straight-alpha RGBA8 in a `vieww_foundation::Image`, which is the
+# same layout `Pixels` wants, so a comparison needs no conversion and no second
+# opinion about what a PNG's bytes mean.
+vieww-asset.workspace = true
+vieww-foundation.workspace = true
+# For `Pixels::encode_png`: the diff images are written by the same encoder
+# that wrote the shots being compared, so a difference in the report can never
+# be an artefact of a second PNG writer. `native` is not a default feature and
+# `vieww_paint::native` is the module `Pixels` lives in, so it is named here
+# rather than left to whatever else in the build happened to turn it on.
+vieww-paint = { workspace = true, features = ["native"] }
+
+[lints]
+workspace = true

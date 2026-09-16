@@ -1,0 +1,28 @@
+[package]
+name = "vieww-cli"
+description = "The `vieww` command-line tool: new/run/test/profile/doctor/build/package as one terminal entry point over the cargo workspace, complementing viewwstudio's GUI equivalents."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "vieww"
+path = "src/main.rs"
+
+[dependencies]
+vieww-build.workspace = true
+
+# A CLI's own argument grammar is not something this project's "keep
+# dependencies small" ethos (see `vieww-foundation`, `vieww-asset::svg`)
+# applies to the same way it does to framework internals: this crate is a
+# leaf binary nothing else in the workspace depends on, so pulling in the
+# ecosystem's one clearly-correct answer costs nothing downstream and saves
+# hand-rolling `--help`/subcommand parsing badly.
+clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

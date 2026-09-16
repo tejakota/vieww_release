@@ -1,0 +1,12 @@
+-- say-language: 1
+-- The screen the welcome card opens: a counter that renders straight away,
+-- with no project, no setup and nothing to read first.
+
+keep a whole number called count starting at 0
+
+screen "Home":
+    a column, spaced 16, children aligned to the start:
+        a heading "Counter"
+        a label "Tapped \(count) times"
+        a button "Add one" which when tapped:
+            add 1 to count

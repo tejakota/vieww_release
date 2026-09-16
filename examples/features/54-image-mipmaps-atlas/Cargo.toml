@@ -1,0 +1,13 @@
+[package]
+name = "feature-image-mipmaps-atlas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-image.workspace = true
+
+[lints]
+workspace = true

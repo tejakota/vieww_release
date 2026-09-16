@@ -1,0 +1,18 @@
+[package]
+name = "guide-counter"
+description = "The counter from docs/guide/getting-started.md, compiled — so the guide's code cannot rot."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+vieww.workspace = true
+vieww-platform-winit.workspace = true
+
+[lints]
+workspace = true

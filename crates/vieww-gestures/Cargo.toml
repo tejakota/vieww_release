@@ -1,0 +1,22 @@
+[package]
+name = "vieww-gestures"
+description = "The vieww gesture layer: the arena, the recognisers, and scroll physics."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Two dependencies, both below this crate. Recognition is pure logic over
+# pointer events and time, so it needs neither a tree to walk nor pixels to draw
+# on — which is what lets every recogniser be tested by feeding it synthetic
+# events. The simulations a released gesture hands off to live in the animation
+# layer, because a controller wants the same two.
+vieww-animation.workspace = true
+vieww-foundation.workspace = true
+
+[lints]
+workspace = true

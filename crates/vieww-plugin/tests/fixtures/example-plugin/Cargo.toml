@@ -1,0 +1,20 @@
+# A real, standalone plugin `cdylib` fixture — not a member of the main
+# `vieww` workspace (the empty `[workspace]` table below fences it off into
+# its own workspace root, so `cargo` never tries to sweep it into the
+# parent's member list or share its `target/`). It exists purely so
+# `vieww-plugin`'s own `tests/example_plugin.rs` can build a genuine
+# `cdylib`, `dlopen` it for real, and exercise `vieww-plugin` across an
+# actual compiled-plugin boundary rather than only in-process.
+[package]
+name = "vieww-example-plugin"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+vieww-plugin = { path = "../../.." }
+
+[workspace]

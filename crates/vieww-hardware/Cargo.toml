@@ -1,0 +1,39 @@
+[package]
+name = "vieww-hardware"
+description = "What this machine actually has: a display, an adapter, a phone. Probed at runtime, so a test can skip for a stated reason instead of pretending."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# **No dependencies at all without `gpu`.** The display, Android and iOS probes
+# are an environment variable and two subprocesses, and a crate that every test
+# in the workspace may come to depend on must not put a graphics stack in the
+# build graph to answer "is there a `DISPLAY`". That is the whole reason the
+# adapter probe is behind a feature rather than always on.
+#
+# `vieww-hal`'s own adapter probe: this crate depends on nothing paint-shaped
+# — `vieww-hal` needs no `Canvas`/`Scene`/`Damage`/`Layer`/`Scheduler` to ask
+# "is there a working Vulkan device on this machine", which is exactly what
+# this probe wants and no more. `vulkan` is `vieww-hal`'s own feature name for
+# its Vulkan backend; requested here under this crate's `gpu` feature so a
+# test binary gating on it does not have to know the HAL crate's internal
+# feature vocabulary.
+vieww-hal = { workspace = true, features = ["vulkan"], optional = true }
+
+[features]
+default = []
+gpu = ["dep:vieww-hal"]
+
+# Without this the `Capability::Gpu` variant — the only probe that is not
+# unconditional — is absent from the published documentation, and the crate
+# reads as though it cannot answer the question it exists to answer.
+[package.metadata.docs.rs]
+features = ["gpu"]
+
+[lints]
+workspace = true

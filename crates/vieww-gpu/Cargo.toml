@@ -1,0 +1,18 @@
+[package]
+name = "vieww-gpu"
+description = "The GPU execution layer: a brutally small backend-agnostic HAL (Device/Queue/Buffer/Texture/Pipeline/Encoder/Fence/Surface), a resource virtualization layer, and CPU-side geometry prep (tessellation, batching, instancing) shared by every backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+lyon_tessellation = "1.0"
+
+[lints]
+workspace = true

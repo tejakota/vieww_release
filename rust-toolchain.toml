@@ -1,0 +1,51 @@
+[toolchain]
+# **Pinned to an exact version, and this is the point of the file.**
+#
+# This said `stable`, which is not a version — it is "whatever rustup resolved
+# on the morning the job ran". Paired with `-D warnings` in `ci/check/checks.sh`'s
+# clippy stage, that makes a gate which can turn red with **nobody having
+# touched the repository**: every six weeks a new clippy ships new lints, they
+# apply to code that has not changed, and the build breaks on somebody else's
+# release schedule.
+#
+# That is not hypothetical here. It is the whole recent history of this gate:
+#
+#   * `manual_clamp` fired on `viewwsite`
+#   * `chunks_exact_to_as_chunks` fired on a feature example
+#   * `manual_is_multiple_of` fired on the rasterizer's dash phase
+#   * `unused_variables` and `unused_imports` on two examples
+#
+# — none of them from a change to that code. Each cost a full CI cycle to learn
+# one line, because `-D warnings` also stops the build at the first one (fixed
+# separately with `--keep-going`).
+#
+# A pinned version makes the lint set a property of this checkout rather than of
+# the calendar. The gate then only breaks when someone changes the code, which
+# is the only thing a gate is for.
+#
+# **Upgrading is a commit, deliberately.** Bump the number here, run
+# `ci/check/checks.sh --quick`, fix or `allow` whatever the new clippy has to say, and
+# push it as its own change with the lint names in the message. That is a
+# half-hour someone chooses, instead of a red build someone inherits.
+#
+# Not to be confused with `rust-version` in `Cargo.toml` (1.89), which is the
+# *oldest* toolchain a consumer can build this with. This is the *exact* one
+# this repository develops and tests against; they move independently.
+channel = "1.98.1"
+# `llvm-tools-preview` is here rather than in a setup step because leaving it out
+# is what kept `ci/check/coverage.sh` from ever running. The gate was written and wired
+# into CI on 2026-08-17 and had still never produced a number on 2026-08-17
+# (later), for no reason more interesting than a component nobody remembered to
+# add — and its absence does not announce itself as a missing component. The
+# script's own preflight exists because `cargo llvm-cov --fail-under-lines` exits
+# non-zero for both "coverage is too low" and "the toolchain is missing", so the
+# machine without it is told its tests regressed.
+#
+# rustup installs everything listed here on the first cargo invocation in this
+# checkout, so a fresh clone can run the gate without reading a doc first.
+#
+# **`cargo-llvm-cov` is still a manual step** — it is a binary from crates.io,
+# not a rustup component, and nothing in this file can install it:
+#
+#     cargo install cargo-llvm-cov
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

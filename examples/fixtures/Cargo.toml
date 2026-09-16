@@ -1,0 +1,23 @@
+[package]
+name = "fixtures"
+description = "The graduated visual fixture gallery: every rendering feature, tiny to complex, as pictures and timings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+vieww = { workspace = true, features = ["native"] }
+vieww-foundation.workspace = true
+vieww-widget.workspace = true
+vieww-element.workspace = true
+vieww-animation.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+gif = "0.14"
+vieww-gpu.workspace = true
+vieww-hal = { workspace = true, features = ["vulkan"] }
+
+[lints]
+workspace = true

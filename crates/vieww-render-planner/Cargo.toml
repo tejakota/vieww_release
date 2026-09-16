@@ -1,0 +1,21 @@
+[package]
+name = "vieww-render-planner"
+description = "Cost-aware CPU/GPU/hybrid execution planning: turns a render graph's ExecutionPlan into a per-pass placement decision for a specific device."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-scene.workspace = true
+vieww-render-graph.workspace = true
+
+[dev-dependencies]
+vieww-paint.workspace = true
+
+[lints]
+workspace = true
