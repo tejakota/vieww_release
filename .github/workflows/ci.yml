@@ -46,10 +46,7 @@ on:
   # ref cancels the run still in progress (see `concurrency`).
   push:
     branches: [main]
-<<<<<<< HEAD
-=======
     tags: ["v*"]
->>>>>>> 93b993d (updated the release checks to check the failed ones)
 
 permissions:
   contents: read
