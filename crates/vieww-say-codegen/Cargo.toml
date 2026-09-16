@@ -1,0 +1,21 @@
+[package]
+name = "vieww-say-codegen"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Say: the English-facing screen language for vieww. Parses .say and generates the Rust the studio compiles."
+
+[dependencies]
+# Deliberately empty. The parser and the code generator are pure: text in,
+# Rust text out, diagnostics either way. Keeping this crate free of vieww
+# itself is what lets the studio's editor, completion and diagnostics read
+# the same registry the generator uses without dragging the render stack
+# into a keystroke's build graph. The *tests* depend on `vieww`, because the
+# strongest thing to assert about generated code is that it compiles.
+
+[dev-dependencies]
+vieww = { path = "../vieww", version = "0.1.0" }
+
+[lints]
+workspace = true

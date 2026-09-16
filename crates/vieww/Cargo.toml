@@ -1,0 +1,51 @@
+[package]
+name = "vieww"
+description = "A Rust UI framework with a Widget/Element/RenderObject architecture."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-animation.workspace = true
+vieww-asset.workspace = true
+vieww-foundation.workspace = true
+vieww-paint.workspace = true
+vieww-widget.workspace = true
+vieww-effects.workspace = true
+vieww-element.workspace = true
+vieww-gestures.workspace = true
+vieww-render.workspace = true
+vieww-text.workspace = true
+
+# **The harness this crate's own suite runs on.**
+#
+# `vieww-test-harness` was built, documented as mandatory by
+# `docs/PRODUCTION-GAPS.md`, and referenced by no crate in the workspace — a
+# harness nobody runs is worth nothing. `tests/partial_repaint.rs` is the suite
+# it was built for. `native` because those tests look at pixels, and it is
+# this crate's one and only rasterizer, with no display attached required.
+[dev-dependencies]
+vieww-test-harness.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+
+[features]
+default = []
+# Forwarded so an application enables the backend once, here, rather than
+# reaching past the umbrella crate to `vieww-paint`. See `vieww-paint`'s own
+# feature docs for what this ships: vieww's own ground-up rasterizer, backed
+# by `vieww-hal`'s raw Vulkan swapchain in `vieww-platform-winit` — vello is
+# gone; see `docs/RENDERER-MIGRATION.md`.
+native = ["vieww-paint/native"]
+
+# `native` is off by default so a cross-build stays small, which means the
+# default docs would describe a framework that cannot reach a screen. docs.rs
+# is the one place the whole surface should be visible at once.
+[package.metadata.docs.rs]
+features = ["native"]
+
+[lints]
+workspace = true

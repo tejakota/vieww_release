@@ -1,0 +1,20 @@
+[package]
+name = "vieww-foundation"
+description = "Geometry, constraints, keys and colors shared by every vieww layer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Grapheme cluster and word boundaries, for moving a caret and deleting. The one
+# dependency this crate has, and it has none of its own. Hand-rolling grapheme
+# segmentation is how backspace ends up leaving half an emoji behind; the tables
+# are Unicode's, and they change with Unicode.
+unicode-segmentation = "1.13"
+
+[lints]
+workspace = true

@@ -1,0 +1,25 @@
+[package]
+name = "vieww-render"
+description = "The vieww render tree: the constraints-down/sizes-up layout protocol, hit testing and paint."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-animation.workspace = true
+vieww-foundation.workspace = true
+vieww-widget.workspace = true
+vieww-element.workspace = true
+# The paint layer sits *below* this one: `RenderObject::paint` draws onto a
+# `vieww_paint::Canvas`. The dependency points one way, from `render/` down to
+# `paint`. See docs/DESIGN.md §7.
+vieww-gestures.workspace = true
+vieww-paint.workspace = true
+vieww-text.workspace = true
+
+[lints]
+workspace = true

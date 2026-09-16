@@ -1,0 +1,62 @@
+[package]
+name = "vieww-asset"
+description = "Loading and decoding an application's own files: images, fonts, anything shipped with the binary."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# Decoding is the whole reason this crate exists rather than living in
+# `vieww-foundation`, which has exactly one dependency and is meant to keep it.
+#
+# `default-features = false` matters more than it looks: the default feature set
+# pulls in every codec the crate knows, including several that carry C
+# dependencies and would break both mobile cross-builds. PNG and JPEG are what a
+# user interface ships; anything else is a feature an application turns on.
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg"]
+
+# XML structure only — `roxmltree` parses elements and attributes and does
+# nothing else, no DTD, no schema, no entity expansion beyond XML's own
+# predefined five. It is already in this workspace's dependency graph (pulled
+# in transitively through the text stack), so naming it directly here adds a
+# feature, not a new crate to audit or a second version to unify.
+#
+# The `d` attribute's own mini-language (`M10 20L30 40C...`) has no existing
+# parser in that graph, so `svg.rs` writes one rather than reaching for
+# `usvg`/`resvg` — see that file's module doc for the subset it covers and,
+# as importantly, the subset it deliberately does not.
+[dependencies.roxmltree]
+version = "0.20"
+optional = true
+
+[features]
+default = []
+# Formats past the two every application uses. Off by default so the mobile
+# cross-builds stay small and so nothing arrives that has not been asked for.
+webp = ["image/webp"]
+gif = ["image/gif"]
+bmp = ["image/bmp"]
+# A first-party vector format, the way `docs/AIMS.md` §I asks for — vector
+# icons are part of an icon set, not a third-party package bolted on.
+# Off by default for the same binary-size reasoning as the raster
+# codecs above: an application that never ships an SVG should not carry the
+# parser.
+svg = ["dep:roxmltree"]
+
+# Every format, so the documentation lists what *can* be decoded rather than
+# what a default build happens to enable. These features add decoders, not API,
+# so nothing here changes shape when they are on.
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

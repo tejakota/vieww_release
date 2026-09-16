@@ -1,0 +1,19 @@
+[package]
+name = "vieww-animation"
+description = "The vieww animation layer: curves, tweens, simulations and the controller."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# The only dependency, deliberately. A curve, a tween and a spring are functions
+# of time — they need no tree to walk and no pixels to draw on, which is what
+# lets every one of them be tested by handing it a `Duration`.
+vieww-foundation.workspace = true
+
+[lints]
+workspace = true

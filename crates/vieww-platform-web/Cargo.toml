@@ -1,0 +1,93 @@
+[package]
+name = "vieww-platform-web"
+description = "The web backend: a vieww application on a <canvas>, presenting the CPU rasterizer's pixels and driving frames from requestAnimationFrame."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# **Not published yet, but no longer unverified.** The reason this line was
+# here — "code no compiler has ever seen" — stopped being true on 2026-09-06;
+# see `src/lib.rs`'s status section. It stays until the crate has a test suite
+# of its own rather than one application that exercises it.
+publish = false
+
+# ── The gating below, and why it stays ──────────────────────────────────────
+#
+# This crate has now been compiled and run (see `src/lib.rs`), so the gating is
+# no longer quarantine. It stays because it is still right: every
+# dependency is under `[target.'cfg(target_arch = "wasm32")'.dependencies]`
+# and `src/lib.rs`'s single module is `#[cfg(target_arch = "wasm32")]`, so on
+# every other target this crate builds to nothing and adds no dependency to
+# resolve. `cargo check --workspace` on a developer's machine is unaffected by
+# its existence, which is deliberate: an unverified crate should not be able
+# to break a verified build.
+#
+# `ci/check/wasm-check.sh` is the gate. On a machine that cannot reach
+# `static.rust-lang.org`, build `std` from source instead — the recipe is in
+# `src/lib.rs`'s status section.
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+vieww-foundation = { workspace = true }
+vieww-widget = { workspace = true }
+vieww-render = { workspace = true }
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-text = { workspace = true }
+vieww-platform = { workspace = true }
+
+wasm-bindgen = "0.2"
+# For `Uint8ClampedArray::view` — the difference between presenting a frame
+# and memcpy'ing it first. See `WebSurface::present`.
+js-sys = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+# **Every type this crate names, and nothing it does not.**
+#
+# `web-sys` gates each binding behind a feature of the same name, and a missing
+# one is a `cannot find type` error rather than a link failure — which is what
+# `ci/check/wasm-check.sh`'s own doc predicts as the first class of thing it will
+# find. Two of them were already sitting here unfound: `src/lib.rs` names
+# `web_sys::Event` (every listener closure takes one) and
+# `web_sys::EventTarget` (`window.clone().into()` in both listener helpers),
+# and neither was listed.
+#
+# Those two do not need the target to find, only somebody comparing this list
+# against `grep -o 'web_sys::[A-Za-z]*' src/lib.rs`, which is what
+# `ci/check/wasm-check.sh` now does *before* trying to install a toolchain — so this
+# particular class of error is caught on any machine, including one that cannot
+# reach `static.rust-lang.org`.
+features = [
+    "AddEventListenerOptions",
+    "CanvasRenderingContext2d",
+    # `HtmlCanvasElement::style()` is inherited from `HtmlElement` and answers a
+    # `CssStyleDeclaration`. web-sys gates an *inherited* method behind the
+    # ancestor's own feature, so the stage-0 audit cannot find this one: the
+    # crate never names either type. It was the single error the first real
+    # compile produced, on 2026-09-06, against rustc 1.95.0.
+    "CssStyleDeclaration",
+    "Document",
+    "DomRect",
+    "Element",
+    "HtmlElement",
+    # Every event listener closure in `src/lib.rs` takes a `web_sys::Event`,
+    # and both helpers coerce the window to a `web_sys::EventTarget` to attach
+    # it. Missing from this list until the audit above was written.
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "ImageData",
+    "KeyboardEvent",
+    "MediaQueryList",
+    "MouseEvent",
+    "Performance",
+    "PointerEvent",
+    "Window",
+    "WheelEvent",
+]
+
+[lints]
+workspace = true

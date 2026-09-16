@@ -1,0 +1,52 @@
+[package]
+name = "vieww-test-harness"
+description = "Headless event-loop test harness: inject synthetic events, advance vsync, collect frame reports — no window required."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-element.workspace = true
+vieww-widget.workspace = true
+vieww-paint = { workspace = true, features = ["native"] }
+vieww-render.workspace = true
+
+[dev-dependencies]
+# Benchmarks only (`benches/harness_benchmarks.rs`) — nothing under `src/`
+# depends on this. Not promoted to `[workspace.dependencies]`: that table
+# holds only this workspace's own `vieww-*` crates (see the root
+# `Cargo.toml`), and every third-party dependency elsewhere — `gif` in
+# `vieww-paint`, `miniz_oxide` in `vieww-devtools` — is pinned inline right
+# where it is used, which this follows.
+#
+# `default-features = false` drops `plotters` and `rayon`, criterion's default
+# HTML-report renderer and its parallel-sampling support. Neither earns its
+# compile cost here: this harness's benchmarks are read from the terminal
+# summary `cargo bench` already prints, not from a browser, and a handful of
+# short single-threaded benchmarks have nothing for `rayon` to parallelize.
+# `cargo_bench_support` is the one feature that is not optional — it is what
+# wires a `harness = false` binary into `cargo bench` at all.
+#
+# Stated plainly rather than left for someone to discover by surprise: even
+# with every optional feature off, criterion 0.8 still pulls in `serde`,
+# `serde_json` and `ciborium` transitively — its own benchmark-history
+# storage format is not itself feature-gated. This is a real exception to
+# this workspace's otherwise-zero-serde rule (see `vieww-devtools` and
+# `vieww-test-harness::suite_report`'s own module docs for why everywhere
+# else hand-rolls JSON instead), confined to this one `[dev-dependencies]`
+# entry: it never reaches the compiled library, an application embedding
+# `vieww`, or any other crate in this workspace — only `cargo bench -p
+# vieww-test-harness` builds it at all.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "harness_benchmarks"
+harness = false
+
+[lints]
+workspace = true

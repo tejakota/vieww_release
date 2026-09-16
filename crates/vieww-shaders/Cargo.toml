@@ -1,0 +1,32 @@
+[package]
+name = "vieww-shaders"
+description = "vieww's shader system: one WGSL library, cross-compiled through naga to SPIR-V/MSL/HLSL, with reflection, pipeline cache keys, and hot-reload hooks — the shared foundation every GPU backend (vieww-hal's vulkan/metal/d3d12 modules) compiles its shaders through, so there is exactly one place shader source lives."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# The one cross-compiler (spec's "one shader source, `naga` translates it" —
+# already the pattern `vieww-hal::vulkan` established for SPIR-V; this crate
+# is where that pattern becomes reusable instead of copy-pasted per backend,
+# and adds the MSL/HLSL targets `vulkan::mod`'s copy never needed). All three
+# backend features are unconditional (not per-platform) because naga's
+# backends are pure Rust codegen with no host dependency: an HLSL string can
+# be produced on Linux with no D3D12 present, an MSL string with no macOS
+# present — that's what makes this crate fully testable in this sandbox.
+naga = { version = "29", features = ["wgsl-in", "spv-out", "msl-out", "hlsl-out"] }
+
+# Pipeline cache keys need real collision resistance — two different shader
+# variants silently sharing one GPU pipeline cache slot is a correctness bug,
+# not a performance one, so a fast-but-collidable hash (`DefaultHasher`,
+# FNV) is the wrong tool. blake3 is small, pure Rust, fast enough to hash a
+# shader's source text once per (re)compile without mattering, and exactly
+# what a content-addressed cache key wants.
+blake3 = { version = "1", features = ["pure"] }
+
+[lints]
+workspace = true

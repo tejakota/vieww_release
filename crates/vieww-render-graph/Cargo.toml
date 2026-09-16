@@ -1,0 +1,20 @@
+[package]
+name = "vieww-render-graph"
+description = "A first-class render graph: passes, resources, dependency analysis, transient aliasing, culling, batching, compiled into a backend-agnostic execution plan."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-scene.workspace = true
+
+[dev-dependencies]
+vieww-paint.workspace = true
+
+[lints]
+workspace = true

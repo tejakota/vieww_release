@@ -1,0 +1,122 @@
+[package]
+name = "vieww-hal"
+description = "vieww's hardware abstraction layer: a sealed Vulkan/Metal/D3D12 device trait, independent of the paint model — the foundation the vello replacement's GPU path builds on."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+
+# The one shared shader library (spec's "one shader source") — see that
+# crate's own top doc for why it lives independently of any backend. Not
+# optional/feature-gated: this crate's `metal`/`d3d12` modules (see their
+# own docs) will need it for their eventual pipeline ports too, and it
+# depends on nothing GPU-specific itself (naga is pure-Rust codegen), so
+# there is no build cost to keeping it unconditional here.
+vieww-shaders.workspace = true
+
+# The scene planner `vulkan::SceneRenderer` executes — `ScenePlan`, `Vertex`
+# and the tessellation behind them. This is a *downward* dependency in the
+# layering the workspace draws (`vieww-gpu` is the architecture, this crate is
+# a backend under it), which is why it is here rather than the reverse: a
+# backend knows the plan format, and the plan format knows nothing about
+# Vulkan. It was previously a dev-dependency only, used by the mesh smoke
+# test; the scene renderer makes it a real one.
+vieww-gpu.workspace = true
+
+# The hardware abstraction layer (spec §4). Optional: this crate's whole
+# reason to exist independent of `vieww-paint` is to stay usable — by
+# `vieww-hardware`'s capability probe, in particular — without any GPU
+# dependency unless a backend is actually requested.
+ash = { version = "0.38", optional = true }
+
+# WGSL is the one shader source (spec §4.4); naga translates it to SPIR-V for
+# the Vulkan backend at build/first-use time. MSL and DXIL targets are wired
+# the same way behind their own platform's feature — see `src/metal.rs` and
+# `src/d3d12.rs`.
+naga = { version = "29", optional = true, features = ["wgsl-in", "spv-out"] }
+
+# The swapchain half of `vulkan`: `VK_KHR_surface` creation from a window
+# handle. `ash-window` does not link against X11/Wayland/Win32 itself — it
+# only returns the right `VkXxxSurfaceCreateInfoKHR` call for whichever
+# `RawDisplayHandle` variant it is given and calls it through the already-
+# loaded Vulkan instance, so this adds no new system dependency beyond the
+# Vulkan loader `vulkan` already needs. `raw-window-handle` is the same 0.6
+# generation `winit` 0.30 implements, so a `winit::window::Window` can be
+# passed straight in.
+ash-window = { version = "0.13", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+# The Metal backend (spec §4.3, §11.3). `cfg`-gated to macOS/iOS at both the
+# `[target...]` dependency level and the `mod metal;` declaration in
+# `src/lib.rs`, so this dependency is never even resolved, let alone built,
+# on any other OS — this crate's Linux/Windows builds (including this
+# delivery's own CI, which runs on Linux) are unaffected by it existing.
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { version = "0.31", optional = true }
+
+# The D3D12 backend (spec §4.3, §11.3). Same reasoning as the Metal block
+# above: gated to Windows at the dependency level, and to
+# `target_os = "windows"` at the `mod d3d12;` declaration, so it never
+# touches a Linux or macOS build. `Win32_Graphics_Direct3D12`/`_Dxgi` are the
+# feature names verified against the fetched `windows` 0.58 crate source
+# (`cargo fetch --target x86_64-pc-windows-msvc`) — see `src/d3d12.rs`'s
+# module doc for exactly which calls in them this backend uses.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", optional = true, features = [
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Foundation",
+] }
+
+[features]
+default = []
+# The Vulkan backend, landing first per the spec's backend matrix (§4.3: "M1
+# ... Vulkan 1.1 ... Timeline semaphores mandatory"). Buildable and testable on
+# Linux and Windows; Metal and D3D12 are separate, OS-gated modules (see
+# `src/metal.rs`, `src/d3d12.rs`) that this feature does not touch.
+vulkan = ["dep:ash", "dep:naga"]
+# The Vulkan swapchain: `VulkanDevice::for_window` and `VulkanSwapchain`,
+# presenting real pixels to a real window. Separate from `vulkan` because the
+# headless half (`VulkanDevice::new`, `render_clear_to_pixels`) has to stay
+# usable — by `vieww-hardware`'s capability probe in particular — on a
+# machine with a Vulkan loader but no windowing system at all (most CI
+# containers). See `src/vulkan/swapchain.rs`.
+vulkan-swapchain = ["vulkan", "dep:ash-window", "dep:raw-window-handle"]
+# The Metal backend. Only resolvable/buildable on macOS — see the
+# `[target.'cfg(target_os = "macos")'.dependencies]` block above. Enabling
+# this feature on any other OS is a no-op (the optional dependency it names
+# does not exist in that target's dependency graph at all, so cargo simply
+# has nothing to turn on), which is the standard, safe shape for
+# platform-gated optional features in a shared workspace `Cargo.toml`.
+metal = ["dep:metal"]
+# The D3D12 backend. Only resolvable/buildable on Windows — see the
+# `[target.'cfg(target_os = "windows")'.dependencies]` block above. Same
+# no-op-elsewhere shape as `metal`.
+d3d12 = ["dep:windows"]
+
+[dev-dependencies]
+# `tests/vulkan_scene.rs` compares the GPU path against the CPU rasterizer,
+# which is the oracle for what a scene looks like — see that file's own doc
+# for why the comparison is against `NativeRenderer` rather than a stored PNG.
+vieww-paint = { workspace = true, features = ["native"] }
+
+# `tests/vulkan_text.rs` shapes its text through the real pipeline rather than
+# hand-assembling a `GlyphRun`. That matters: a hand-written run has round
+# baseline coordinates, and sub-pixel phase — the thing the glyph cache and the
+# atlas key on — is exactly what round numbers cannot exercise.
+vieww-text.workspace = true
+
+[lints]
+workspace = true
+
+[[example]]
+name = "adapter"
+required-features = ["vulkan"]

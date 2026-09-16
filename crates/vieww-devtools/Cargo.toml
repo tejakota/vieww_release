@@ -1,0 +1,43 @@
+[package]
+name = "vieww-devtools"
+description = "Developer tools: the widget inspector, snapshot testing, and inspectors over frame timing, the render graph, damage, memory, semantics, and GPU state, plus a hand-rolled JSON export for all of it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+vieww-element.workspace = true
+vieww-foundation.workspace = true
+vieww-gpu.workspace = true
+vieww-image.workspace = true
+vieww-paint.workspace = true
+vieww-render.workspace = true
+vieww-render-graph.workspace = true
+vieww-platform.workspace = true
+vieww-widget.workspace = true
+
+# Real DEFLATE, for decoding the PNGs `png_compare` compares.
+#
+# `miniz_inflate` used to be a stub whose real body was a comment
+# (`// decompress_to_vec(data).ok()`) above a hand-rolled stored-block reader
+# that returned `None` for any compressed block. Every PNG a renderer actually
+# writes is compressed, so `compare_pngs` returned `None` for all real input
+# and snapshot comparison never once worked.
+miniz_oxide = "0.8"
+
+[dev-dependencies]
+# Only for building a small real `vieww-render-graph::Graph` in
+# `render_graph_inspector`'s and `json_export`'s own tests — `PassDesc::new`
+# needs a `CostHint` and this crate otherwise has no reason to name one.
+vieww-scene.workspace = true
+
+[features]
+default = []
+# Enable vieww's own rasterizer for snapshot testing, and (since it needs
+# `vieww_paint::native`) the `memory_inspector` module's paint-side pool and
+# glyph-outline residency reporting.
+snapshots = ["vieww-paint/native"]
+
+[lints]
+workspace = true

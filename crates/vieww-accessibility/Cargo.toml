@@ -1,0 +1,25 @@
+[package]
+name = "vieww-accessibility"
+description = "Automated accessibility verification: WCAG contrast-ratio checking and static audits of a rendered semantics tree (missing labels, undersized touch targets, focus/action inconsistencies) — the piece the AccessKit bridge in vieww-platform-winit does not itself provide."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vieww-foundation.workspace = true
+vieww-render.workspace = true
+vieww-widget.workspace = true
+
+[dev-dependencies]
+# `audit.rs`'s own tests need real `SemanticsNode`s with real `RenderId`s —
+# `RenderId::new` is `pub(crate)` to `vieww-render`, so the only way to get
+# one from outside it is to mount a real widget tree and read back its real
+# semantics tree, exactly what a headless test harness is for.
+vieww-test-harness.workspace = true
+
+[lints]
+workspace = true
