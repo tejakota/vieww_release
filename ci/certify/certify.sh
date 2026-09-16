@@ -149,6 +149,18 @@ skip() {
 		-o -name '*.ps1' -o -name '*.py' -o -name '*.lock' -o -name '*.ttf' -o -name '*.otf' \
 		-o -name '*.html' \) -not -path '*/target/*' -not -path '*/dist/*' -print0 2>/dev/null |
 		sort -z | xargs -0 "${SHA256[@]}" | "${SHA256[@]}" | cut -d' ' -f1)
+	# In a git checkout the digest is git's own content address for the
+	# committed tree, plus a marker if the working tree differs. It is the same
+	# on every OS; a hash of files on disk is not: Windows checks text files out
+	# with CRLF line endings, and the Windows and Unix scripts hashed differently,
+	# so two runs of one commit reported different digests (G0.12).
+	if tree=$(git rev-parse 'HEAD^{tree}' 2>/dev/null); then
+		if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+			digest="git-tree:$tree+modified"
+		else
+			digest="git-tree:$tree"
+		fi
+	fi
 	echo "source_digest=$digest"
 } >"$OUT/meta/source.txt"
 
@@ -220,6 +232,12 @@ elif have_vulkan; then
 		else
 			record gpu/device-class "SOFTWARE($device; correctness only, not a GPU certification)"
 		fi
+	elif echo "$device" | grep -qiE 'paravirtual|virtio|virgl|venus'; then
+		# A hypervisor passing a real host GPU through (GitHub's macOS runners:
+		# "Apple Paravirtual device"). Real GPU execution, so the parity suite
+		# and census are evidence; the timings belong to a shared host.
+		echo "device_class=virtual" >>"$OUT/gpu/device.txt"
+		record gpu/device-class "PASS(virtual GPU: $device; pixels are evidence, timings are not)"
 	else
 		echo "device_class=hardware" >>"$OUT/gpu/device.txt"
 		record gpu/device-class "PASS($device)"

@@ -71,7 +71,7 @@ Options:
 |---|---|---|
 | Linux CPU | Local machine | `ci/vieww gate --mode cpu` |
 | Linux GPU | Same machine, afterwards | `ci/vieww gate --mode gpu`. Only the GPU-dependent rows: device class, Vulkan parity suite, GPU workload, census, desktop suite. It builds a small slice of the workspace. |
-| Windows / macOS CPU | GitHub-hosted runners | `.github/workflows/release-gate.yml`: run it manually, or push a `v*` tag. It never runs on pull requests. |
+| Windows / macOS CPU, macOS GPU (paravirtual, via MoltenVK) | GitHub-hosted runners | `.github/workflows/release-gate.yml`: run it manually, or push a `v*` tag. It never runs on pull requests. |
 
 Hosted runners have much less free disk than a gate needs, so the workflow first runs `tools/ci-runner-prep.sh`. That script deletes unused SDKs and, on Windows, moves `target/` to the drive with the most room. It refuses to run outside GitHub Actions.
 

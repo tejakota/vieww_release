@@ -18,6 +18,8 @@
 #   ci/vieww gate --skip-shots       # don't capture feature screenshots
 #   ci/vieww gate --keep-builds      # don't delete target/debug, target/release, ... as phases finish
 #   ci/vieww gate --keep-evidence    # keep every image of stages that passed
+#   ci/vieww gate --only G1.1,G3.1   # rerun just these rows (e.g. the ones that failed);
+#                                    # G1.3 brings its stage rows (G1.4-G1.12), G3.1 brings G8.*
 #   VIEWW_FULL_DEBUG=1 ci/vieww gate # debuginfo + incremental builds (needs far more disk)
 #
 # Disk: builds are lean by default (ci/lib/lean.sh: no debuginfo, no
@@ -60,6 +62,7 @@ against=""
 shots=yes
 keep_builds=""
 keep_evidence=""
+only=""
 while (($# > 0)); do
 	case "$1" in
 	--mode) mode="$2"; shift ;;
@@ -72,6 +75,8 @@ while (($# > 0)); do
 	--skip-shots) shots="" ;;
 	--keep-builds) keep_builds=yes ;;
 	--keep-evidence) keep_evidence=yes ;;
+	--only) only="$2"; shift ;;
+	--only=*) only="${1#--only=}" ;;
 	-h | --help) sed -n '2,48p' "${BASH_SOURCE[0]}"; exit 0 ;;
 	*) echo "gate: unknown argument $1" >&2; exit 2 ;;
 	esac
@@ -98,7 +103,21 @@ results="$out/rows.tsv"
 failed=0
 
 # row ID DESCRIPTION CMD... — run, log, record PASS/FAIL.
+# wanted ID — is this row part of the run? Everything is, unless --only.
+wanted() {
+	[[ -z "$only" ]] && return 0
+	local id="$1" list=",${only// /},"
+	[[ "$id" == PRE.* ]] && return 0
+	[[ "$list" == *",$id,"* ]] && return 0
+	# Rows read out of another row's output come with it.
+	[[ "$id" =~ ^G1\.([4-9]|1[0-2])$ && "$list" == *",G1.3,"* ]] && return 0
+	[[ "$id" == G8.* && "$list" == *",G3.1,"* ]] && return 0
+	[[ "$id" == G1.13x && "$list" == *",G1.13,"* ]] && return 0
+	return 1
+}
+
 row() {
+	wanted "$1" || return 0
 	local id="$1" what="$2"
 	shift 2
 	local log="$out/logs/$id.txt"
@@ -117,9 +136,16 @@ row() {
 		printf '%s\t%s\tFAIL(exit=%s)\tlogs/%s.txt\n' "$id" "$what" "$rc" "$id" >>"$results"
 		failed=1
 		echo "    FAIL: $id (see $log)"
+		# The reason, here, so nobody has to open the log to find out.
+		grep -v '^exit=' "$log" | tail -n 4 | sed 's/^/      | /'
+
 	fi
 }
-note() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-}" >>"$results"; }
+note() {
+	wanted "$1" || return 0
+	[[ "$3" == FAIL* ]] && failed=1
+	printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-}" >>"$results"
+}
 
 # ── host record ──────────────────────────────────────────────────────────────
 version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
@@ -185,7 +211,6 @@ if [[ -n "$free_kb" ]]; then
 	[[ -n "$keep_builds" ]] && need_gb=$((need_gb + 20))
 	if ((free_gb < need_gb)); then
 		note PRE.1 "at least $need_gb GB free for target/" "FAIL(${free_gb} GB free; lld crashes with SIGBUS when the disk fills)" host.txt
-		failed=1
 		echo "gate: only ${free_gb} GB free under $root (want $need_gb) — expect link failures (SIGBUS). Free space, run 'cargo clean', or set CARGO_TARGET_DIR to a bigger disk." >&2
 	else
 		note PRE.1 "at least $need_gb GB free for target/" "PASS(${free_gb} GB free)" host.txt
@@ -204,15 +229,13 @@ if rustc --version 2>/dev/null | grep -q " $pinned "; then
 	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" PASS host.txt
 else
 	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" "FAIL($(rustc --version 2>&1 | head -1))" host.txt
-	failed=1
 fi
 if [[ "$mode" != gpu ]]; then
 row G0.4 "release-clean (no patch leftovers, stale evidence, local paths)" bash ci/check/release-clean-check.sh "$root"
 if git rev-parse --git-dir >/dev/null 2>&1; then
-	row G0.5 "git working tree clean" bash -c '[[ -z "$(git status --porcelain)" ]] || { git status --short; exit 1; }'
+	row G0.5 "git working tree clean" bash -c 'st=$(git status --porcelain); [[ -z "$st" ]] || { echo "changed or untracked files:"; echo "$st" | head -40; exit 1; }'
 else
 	note G0.5 "git working tree clean" "FAIL(not a git checkout — certify from the tagged commit)" ""
-	failed=1
 fi
 row G0.6 "LICENSE present" test -s LICENSE
 row G0.7 "no private keys or credentials in the tree" bash -c '
@@ -223,7 +246,6 @@ if command -v cargo-deny >/dev/null; then
 	row G0.8 "cargo deny check all" cargo deny check all
 else
 	note G0.8 "cargo deny check all" "FAIL(cargo-deny not installed: cargo install cargo-deny --locked)" ""
-	failed=1
 fi
 
 # ── Gate 1: framework ────────────────────────────────────────────────────────
@@ -306,7 +328,7 @@ fi
 # ── Gate 3 / 8: artifacts and integrity ──────────────────────────────────────
 if [[ "$mode" == gpu ]]; then
 	: # installers are CPU work; the CPU pass or CI builds them
-elif [[ -n "$package" ]]; then
+elif [[ -n "$package" ]] && wanted G3.1; then
 	row G3.1 "installers build (package.sh --installers) + bundle compiles a guest" bash ci/release/artifacts.sh
 	mkdir -p "$out/package"
 	cp target/package/SHA256SUMS target/package/MANIFEST.txt "$out/package/" 2>/dev/null
@@ -325,7 +347,6 @@ elif [[ -n "$package" ]]; then
 		note G8.2 "toolchain + source recorded with the artifacts" PASS package/MANIFEST.txt
 	else
 		note G8.1 "SHA256SUMS generated for every artifact" "FAIL(no artifacts)" logs/G3.1.txt
-		failed=1
 	fi
 else
 	note G3.1 "installers build" "SKIPPED(--skip-package)" ""

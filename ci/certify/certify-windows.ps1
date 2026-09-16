@@ -83,6 +83,13 @@ $sourceFiles = Get-ChildItem -Recurse -File -Path Cargo.toml, Cargo.lock, rust-t
   Sort-Object { $_.FullName.Substring($Root.Length).Replace('\', '/') }
 $hashes = ($sourceFiles | ForEach-Object { (Get-FileHash -Algorithm SHA256 $_.FullName).Hash }) -join "`n"
 $digest = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($hashes))).Replace('-', '').ToLower()
+# Same rule as certify.sh: in a git checkout, git's tree id (identical on every
+# OS, unlike a hash of CRLF-checked-out files), marked if tracked files changed.
+$tree = git rev-parse 'HEAD^{tree}' 2>$null
+if ($LASTEXITCODE -eq 0 -and $tree) {
+  $modified = git status --porcelain --untracked-files=no 2>$null
+  $digest = if ($modified) { "git-tree:$tree+modified" } else { "git-tree:$tree" }
+}
 @("git_rev=$(git rev-parse HEAD 2>$null)", "source_digest=$digest") | Set-Content (Join-Path $OutDir 'meta\source.txt')
 
 $hasVulkan = $false
