@@ -1,0 +1,78 @@
+[package]
+name = "viewwstudio"
+description = "vieww Studio: a desktop editor and device-framed preview for vieww screens, built with vieww."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# **The umbrella crate, and the whole reason the preview renders at all.**
+#
+# The buffer is compiled against `vieww`, so the widgets it builds are
+# `vieww`'s types. The host resolves them through a `TypeId`-keyed factory. If
+# the studio links `vieww-widget` directly and the guest reaches it through a
+# separately-built `vieww`, those are two compilations of one crate and their
+# `TypeId`s do not match — the factory misses every widget, and the preview
+# renders nothing at all while reporting success. Depending on `vieww` here is
+# what puts host and guest in one dependency graph.
+vieww.workspace = true
+vieww-platform-winit.workspace = true
+vieww-foundation.workspace = true
+vieww-widget.workspace = true
+vieww-element.workspace = true
+vieww-render.workspace = true
+vieww-text.workspace = true
+vieww-gestures.workspace = true
+# Say: the English-facing screen language. The studio hands a `.say` buffer
+# to `vieww_say_codegen::compile` ahead of the usual compile step; see
+# `docs/SAY.md`.
+vieww-say-codegen.workspace = true
+# For `AssetBundle`/`DirectoryBundle`/`EmbeddedBundle`: the studio wraps the
+# platform's bundle in a `WorkspaceBundle` that resolves against the open
+# project's `assets/` first. See `src/assets.rs`.
+vieww-asset.workspace = true
+# For `Tickers`/`Ticker`: the caret blink is driven by the frame scheduler
+# rather than a clock of its own. See `src/caret.rs`.
+vieww-animation.workspace = true
+
+# The only third-party dependency in the studio, and it is here because the
+# alternative is `dlopen` through `libc` by hand. Pinned loosely: the surface
+# used is `Library::new` and `get`, which has not changed in years.
+libloading = "0.8"
+tree-sitter = "0.26"
+# **One grammar per language the studio claims to highlight.**
+#
+# The `Language` enum has named twenty-five languages since M6 and exactly one
+# of them was highlighted; the other twenty-four were drawn as plain text with a
+# correct label, which `language.rs` was honest about and which is still not
+# what a person opening `Cargo.toml` in an editor expects to see.
+#
+# These four are the files a Rust project actually contains besides its `.rs`:
+# a `Cargo.toml`, a `.json` config, a CI `.yml`, a `README.md`. Each is a
+# self-contained C grammar with no dependencies of its own beyond `tree-sitter`
+# itself, so the cost is compile time and binary size rather than a dependency
+# tree.
+tree-sitter-rust = "0.24.2"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7"
+tree-sitter-md = "0.5"
+
+[dev-dependencies]
+vieww-test-harness.workspace = true
+# `native` is vieww's one and only rasterizer, and it needs no adapter: this
+# container, and every CI runner without a graphics adapter, has no GPU at
+# all, which is what makes `examples/screenshot` produce a picture rather
+# than an apology — see that file's own docs, and `vieww-paint::native`'s.
+vieww-paint = { workspace = true, features = ["native"] }
+# The GPU tests below skip on a machine with no adapter. `vieww-hardware` is
+# what makes that skip *stated* — and, with VIEWW_REQUIRE_HARDWARE=gpu set, a
+# failure instead, which is the whole point of the crate.
+vieww-hardware = { workspace = true, features = ["gpu"] }
+vieww-render.workspace = true
+vieww-element.workspace = true
+
+[lints]
+workspace = true
