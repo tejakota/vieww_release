@@ -179,7 +179,7 @@ pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
 	else
 		echo "vulkan=not found (vulkaninfo missing)"
 	fi
-	echo "rustc=$(rustc --version 2>&1 | head -1)"
+	echo "rustc=$(rustc --version 2>/dev/null | head -1)"
 	echo "cargo=$(cargo --version 2>&1 | head -1)"
 	echo "toolchain_pinned=$pinned"
 	echo "version=$version"
@@ -231,12 +231,14 @@ fi
 if rustc --version 2>/dev/null | grep -q " $pinned "; then
 	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" PASS host.txt
 else
-	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" "FAIL($(rustc --version 2>&1 | head -1))" host.txt
+	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" "FAIL($(rustc --version 2>/dev/null | head -1))" host.txt
 fi
 if [[ "$mode" != gpu ]]; then
 row G0.4 "release-clean (no patch leftovers, stale evidence, local paths)" bash ci/check/release-clean-check.sh "$root"
 if git rev-parse --git-dir >/dev/null 2>&1; then
-	row G0.5 "git working tree clean" bash -c 'st=$(git status --porcelain); [[ -z "$st" ]] || { echo "changed or untracked files:"; echo "$st" | head -40; exit 1; }'
+	# target/ is excluded: this gate is writing its own run folder there. Whether
+	# target/ is *ignored* (a committed .gitignore) is checked by G0.4.
+	row G0.5 "git working tree clean" bash -c 'st=$(git status --porcelain -- . ":(exclude)target"); [[ -z "$st" ]] || { echo "changed or untracked files:"; echo "$st" | head -40; exit 1; }'
 else
 	note G0.5 "git working tree clean" "FAIL(not a git checkout — certify from the tagged commit)" ""
 fi
@@ -246,7 +248,7 @@ row G0.7 "no private keys or credentials in the tree" bash -c '
 		-e "-----BEGIN [A-Z ]*PRIVATE KEY-----" \
 		-e "AKIA[0-9A-Z]{16}" -e "gh[pousr]_[A-Za-z0-9]{36}" -e "xox[baprs]-[A-Za-z0-9-]{10,}" .'
 if command -v cargo-deny >/dev/null; then
-	row G0.8 "cargo deny check all" cargo deny check all
+	row G0.8 "cargo deny check all" cargo deny check --hide-inclusion-graph all
 else
 	note G0.8 "cargo deny check all" "FAIL(cargo-deny not installed: cargo install cargo-deny --locked)" ""
 fi
@@ -428,7 +430,11 @@ if [[ -z "$keep_evidence" && -f "$out/cert/quality/stages.txt" ]]; then
 		find "$dir" -type f ! -name '*.txt' ! -name '*.json' ! -name '*.md' ! -name '*.csv' -delete
 		find "$dir" -type d -empty -delete
 	done <"$out/cert/quality/stages.txt"
-	grep -qE '^gpu[/\\]census[[:space:]]+PASS' "$out/cert/quality/stages.txt" && rm -rf "$out/cert/gpu/census-out"
+	# The census diffs are the only way to see a failed census gate; keep them then.
+	if grep -qE '^gpu[/\\]census[[:space:]]+PASS' "$out/cert/quality/stages.txt" &&
+		! grep -qiE 'census.*FAIL' "$out/cert/quality/stages.txt"; then
+		rm -rf "$out/cert/gpu/census-out"
+	fi
 fi
 echo "gate: disk after: $(vieww_disk "$root"), evidence $(du -sh "$out" 2>/dev/null | cut -f1)"
 

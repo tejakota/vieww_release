@@ -284,7 +284,7 @@ Record **release-hardware** numbers separately from headless results. The measur
 
 | ID | Sev | Description | Fix | Status |
 |---|---|---|---|---|
-| B1 | **P0** | **MoltenVK is not bundled in the macOS `.app`.** Without the Vulkan SDK installed, Studio cannot open a window on a user's Mac. The instance and device portability flags needed for MoltenVK were added in this pass, but have **not been run on a Mac yet**. | Copy `libMoltenVK.dylib` into `Contents/Frameworks` and `MoltenVK_icd.json` into `Contents/Resources/vulkan/icd.d`. Point the loader at them, or load MoltenVK directly with `ash::Entry::load_from`. Verify with G3.2 and G3.4 on a clean Mac. | Open |
+| B1 | **P0** | **MoltenVK is not bundled in the macOS `.app`.** Without the Vulkan SDK installed, Studio cannot open a window on a user's Mac. The instance and device portability flags needed for MoltenVK were added in this pass, but have **not been run on a Mac yet**. | Copy `libMoltenVK.dylib` into `Contents/Frameworks` and `MoltenVK_icd.json` into `Contents/Resources/vulkan/icd.d`. `vieww_hal::vulkan::load_entry` now looks there first (`Contents/Frameworks/libvulkan.1.dylib`, then `libMoltenVK.dylib`), then in `$VULKAN_SDK` and Homebrew. The remaining work is copying those files in `package.sh`. Verify with G3.2 and G3.4 on a clean Mac. | Open |
 | B2 | P0 for public, P2 for dev preview | Windows artifacts are unsigned (SmartScreen warning) | Authenticode certificate plus a `signtool` step, or WAIVE with disclosure | Open |
 | B3 | P0 for public, P2 for dev preview | macOS artifacts are neither signed nor notarized. Gatekeeper blocks the first launch. | Developer ID, Hardened Runtime, `notarytool`, staple, or WAIVE with disclosure | Open |
 | B4 | P1 | No `CHANGELOG.md` and no release notes | Fill in `RELEASE-NOTES-TEMPLATE.md` | Open |
@@ -304,6 +304,7 @@ Record **release-hardware** numbers separately from headless results. The measur
 | B18 | P1 | **iOS simulator export could not work.** It demanded a signing identity (simulator builds don't need one), and the `.app` stayed in Xcode's DerivedData, so the export folder never got the file. | **Fixed**: identity only required for `.ipa`; `xcodebuild` writes into the export folder. Confirm with G2.11 on macOS CI. | Fixed, awaiting CI |
 | B19 | P2 | Android export builds `arm64-v8a` only, so it won't install on an x86_64 emulator on an Intel/AMD PC. | Document, or add `x86_64` to the `cargo ndk -t` list and `abiFilters` | Open |
 | B20 | P2 | The scaffold pins `channel = "stable"`, but Studio's Toolchains view checks the targets of Studio's own toolchain (1.98.1 here). A user can see "ready" and still have the export fail with a missing target for `stable`. | Pin the scaffold to the Studio's exact version, or check targets inside the project directory | Open |
+| B21 | P1 | Vulkan compositor diverges on NVIDIA (Tesla T4, Linux): 10/17 parity tests fail — every test that runs a post pass (layers, blur, blend, shadow, mask); plain draws, gradients, images and strokes pass; a steady frame renders differently the second time; workload parity 31%, census flat-region mismatch. lavapipe passes 17/17 with 0 core validation errors. Not user-facing today (Studio presents CPU pixels, B10), but blocks G1.5/G1.6. | Shader image loads are now bounds-checked (naga `ReadZeroSkipWrite`) to remove one class of driver-dependent UB; `certify` re-runs a failing suite under the Khronos validation layer (`gpu/vulkan-validation.txt`). Re-run `ci/vieww gate --mode gpu` on NVIDIA with `vulkan-validationlayers` installed and fix what it names | Open |
 
 ---
 
@@ -339,7 +340,7 @@ Paste `host.txt` from each gate run.
 | 8 Supply chain | ☐ | | |
 | 9 Signing / trust | ☐ | | |
 | 10 Publishing | ☐ | | |
-| Blockers B1–B20 closed or waived | ☐ | | |
+| Blockers B1–B21 closed or waived | ☐ | | |
 
 **BETA RELEASE: APPROVED / NOT APPROVED**
 

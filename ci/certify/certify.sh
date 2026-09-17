@@ -128,7 +128,7 @@ skip() {
 	echo "no_gpu=${VIEWW_CERT_NO_GPU:-0}"
 	echo "require_real_gpu=${VIEWW_CERT_REQUIRE_REAL_GPU:-0}"
 	echo "arch=$(uname -m)"
-	echo "rust=$(rustc --version 2>&1 | head -1)"
+	echo "rust=$(rustc --version 2>/dev/null | head -1)"
 	echo "cargo=$(cargo --version 2>&1 | head -1)"
 	echo "toolchain_file=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
 	echo "display=${DISPLAY:-}"
@@ -242,7 +242,21 @@ elif have_vulkan; then
 		echo "device_class=hardware" >>"$OUT/gpu/device.txt"
 		record gpu/device-class "PASS($device)"
 	fi
-	run gpu/vulkan-suite cargo test -p vieww-hal --features vulkan -- --ignored --test-threads=1
+	if ! run gpu/vulkan-suite cargo test -p vieww-hal --features vulkan -- --ignored --test-threads=1; then
+		# A parity failure on one driver is usually undefined behaviour another
+		# driver forgave. Re-run the compositor tests under the Khronos
+		# validation layer (core + synchronization) so the evidence names it.
+		if vulkaninfo 2>/dev/null | grep -q VK_LAYER_KHRONOS_validation; then
+			vlog="$OUT/gpu/vulkan-validation.txt"
+			VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation \
+				VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT \
+				cargo test -p vieww-hal --features vulkan --test vulkan_compositor -- --ignored --test-threads=1 --nocapture >"$vlog" 2>&1 || true
+			n=$(grep -c 'Validation Error' "$vlog" || true)
+			record gpu/vulkan-validation "INFO(${n:-0} validation errors; see gpu/vulkan-validation.txt)"
+		else
+			record gpu/vulkan-validation "INFO(validation layer not installed: apt install vulkan-validationlayers)"
+		fi
+	fi
 	run gpu/workload cargo run --release -p test-gpu-work -- "$OUT/gpu/workload"
 	run gpu/census cargo run --release -p fixtures -- "$OUT/gpu/census-out" --census
 else

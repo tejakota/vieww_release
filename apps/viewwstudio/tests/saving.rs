@@ -24,7 +24,11 @@ impl Dir {
             std::env::temp_dir().join(format!("viewwstudio-saving-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("temp dir");
-        Self(path)
+        // Canonical, because `open_workspace` canonicalizes its root: on macOS
+        // the temp directory is `/var/folders/…`, a symlink to
+        // `/private/var/folders/…`, and every path the studio reports back is
+        // the second spelling. Comparing against the first failed only there.
+        Self(std::fs::canonicalize(&path).unwrap_or(path))
     }
 }
 

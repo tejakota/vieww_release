@@ -9,7 +9,10 @@ publish = false
 
 [dependencies]
 gif = "0.14"
-image = "0.25"
+# PNG output only. The default formats pull in AVIF/EXR decoding (rav1e, exr,
+# pulp) and, through pulp, `paste` — unmaintained, RUSTSEC-2024-0436, which
+# failed `cargo deny` for the whole workspace on behalf of two screenshot writers.
+image = { version = "0.25", default-features = false, features = ["png"] }
 vieww-element.workspace = true
 vieww = { workspace = true, features = ["native"] }
 vieww-foundation.workspace = true

@@ -61,7 +61,7 @@ fn main() {
 /// Every physical device the loader offers, in enumeration order — which is
 /// also selection order, since `pick_physical_device` takes the first match.
 fn enumerate() {
-    let entry = match unsafe { ash::Entry::load() } {
+    let entry = match vieww_hal::vulkan::load_entry() {
         Ok(entry) => entry,
         Err(error) => {
             eprintln!("no vulkan loader: {error}");

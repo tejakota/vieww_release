@@ -209,8 +209,16 @@ binary="$target/viewwstudio"
 #
 # One line per message, and paths do not contain quotes, so this needs no JSON
 # parser and therefore no Python on the packaging machine.
+#
+# **Windows paths arrive JSON-escaped** — `"D:\\a\\...\\libvieww-….rlib"` — so
+# they are turned into forward-slash paths, which Git Bash's `cp` and `[ -f ]`
+# accept and which the `/libvieww-` pattern below can match. Before this, the
+# pattern matched nothing on Windows and, under `set -euo pipefail`, the
+# command substitution that asked for the rlib ended the script silently right
+# after "drawing icons" — no message, exit 1, no installer.
 artefacts() {
-	grep -o '"[^"]*\.\(rlib\|rmeta\|so\|dylib\|dll\)"' "$build_log" | tr -d '"' | sort -u
+	grep -o '"[^"]*\.\(rlib\|rmeta\|so\|dylib\|dll\)"' "$build_log" | tr -d '"' |
+		sed 's#\\\\#/#g; s#\\#/#g' | sort -u
 }
 
 # The umbrella `vieww` rlib, by its real hashed name.
@@ -221,7 +229,9 @@ artefacts() {
 # applies, which is not a coincidence — it is the rule this bundle exists to
 # make unnecessary.
 vieww_rlib_path() {
-	artefacts | grep '/libvieww-[^/]*\.rlib$' | head -1
+	# `|| true`: no match must reach the explanatory message in copy_rlibs, not
+	# end the script through `set -e` inside a command substitution.
+	artefacts | grep '/libvieww-[^/]*\.rlib$' | head -1 || true
 }
 
 # The rlibs the preview links against. Copied rather than symlinked: the whole
