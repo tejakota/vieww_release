@@ -44,6 +44,9 @@ check (fast, deterministic)
 
 certify (evidence on a real machine)
   certify [OUT]      every suite, one verdict (Linux/macOS; Windows: pwsh ci/certify/certify-windows.ps1)
+  export [OUT] [--compile-only] [--install-targets]
+                     Studio's export route: scaffold, compile for Android/iOS/Windows,
+                     build a real desktop binary, .exe, .apk and iOS simulator .app
   studio [--quick]   Studio release_check + tour + walkthrough, screenshot gallery
   desktop [...]      real-window desktop suite (--expect-hidpi, --expect-multi-monitor)
   shots [...]        screenshot every feature example; --against DIR to diff machines
@@ -89,6 +92,7 @@ certify)
 	*) exec bash "$here/certify/certify.sh" "$@" ;;
 	esac
 	;;
+export) exec bash "$here/certify/export-suite.sh" "$@" ;;
 studio) exec bash "$here/certify/release-check.sh" "$@" ;;
 desktop) exec bash "$here/certify/desktop-suite.sh" "$@" ;;
 shots) exec bash "$here/certify/shot-suite.sh" "$@" ;;

@@ -12,15 +12,15 @@
 # from a fork must not get a multi-hour job, or any job with write access.
 #
 # Results:
-#   gate-windows-cpu, gate-macos-cpu, gate-macos-gpu
+#   gate-windows-cpu, gate-macos-cpu, gate-macos-gpu, gate-linux-export
 #                               run folders (CHECKLIST.md, logs, evidence)
-#   installers-windows/-macos   .msi/.zip, .dmg, SHA256SUMS, MANIFEST.txt
+#   installers-windows-cpu/-macos-cpu   .msi/.zip, .dmg, SHA256SUMS, MANIFEST.txt
 #   checklist-ci                both runs merged into one CHECKLIST-ci.md
 #                               (also shown on the run's summary page)
 #
 # Merge with the local Linux runs:
 #   ci/vieww checklist target/release-gate/linux-cpu-* target/release-gate/linux-gpu-* \
-#       gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ -o CHECKLIST.md
+#       gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ gate-linux-export/ -o CHECKLIST.md
 
 name: release-gate
 
@@ -57,7 +57,7 @@ concurrency:
 
 jobs:
   gate:
-    name: gate (${{ matrix.os }}, ${{ matrix.mode }})
+    name: gate (${{ matrix.id }})
     strategy:
       fail-fast: false
       matrix:
@@ -72,29 +72,45 @@ jobs:
         #            G1.9 Vieww Standard · G1.13 screenshots · G2.1 Studio walkthrough
         #   macOS:   G3.1 installer (.dmg) + G8.1/G8.2 checksums
         #
+        # G2.7-G2.11 (Studio's export route: scaffold, compile for Android/iOS/
+        # Windows, build a real .apk/.app/.exe) are new and have never run, so
+        # every list carries them until they pass.
+        #
         # and these FAILED, so they are what reruns execute. G1.3 re-runs the
         # whole certification (its stages are not separable from the outside);
         # G0.12 is computed when runs are merged and needs no row here.
         # Once a row passes, delete it from its list; empty the list (or pick
         # rerun=all) for the final certification run.
         include:
-          - os: windows
+          - id: windows-cpu
+            os: windows
             runner: windows-latest
             mode: cpu
-            failed: G0.5,G0.8,G1.1,G1.3,G3.1
-          - os: macos
+            failed: G0.5,G0.8,G1.1,G1.3,G3.1,G2.7,G2.8,G2.9,G2.10,G2.11
+          - id: macos-cpu
+            os: macos
             runner: macos-latest
             mode: cpu
-            failed: G0.5,G0.8,G1.1,G1.3
+            failed: G0.5,G0.8,G1.1,G1.3,G2.7,G2.8,G2.9,G2.10,G2.11
           # The macOS runner exposes Apple's paravirtualized GPU, which MoltenVK
           # drives: the narrow GPU pass there is the only test of the Vulkan
           # parity suite and census through MoltenVK (blocker B1's portability
           # path) that this project has. A virtual device, not a user's GPU, so
           # its timings mean nothing; its pixels do.
-          - os: macos
+          - id: macos-gpu
+            os: macos
             runner: macos-latest
             mode: gpu
             failed: ""   # new job: nothing has passed yet, so it always runs in full
+          # Linux's own gate runs on your laptop. This job is only the export
+          # route, because the hosted Ubuntu image already has the Android SDK,
+          # NDK and JDK a laptop may not: a Linux .apk and a MinGW-cross .exe.
+          - id: linux-export
+            os: linux
+            runner: ubuntu-latest
+            mode: cpu
+            failed: G2.7,G2.8,G2.9,G2.10,G2.11
+            export-only: true
     runs-on: ${{ matrix.runner }}
     # Hosted jobs are cut off at 6 hours.
     timeout-minutes: 350
@@ -105,10 +121,14 @@ jobs:
       CARGO_TERM_COLOR: always
       # No display a test can own, and no GPU: see the header.
       VIEWW_CERT_NO_DESKTOP: "1"
+      # Throwaway machines: let the export suite add the Android/iOS/Windows
+      # rustup targets (for this repo's toolchain and the scaffold's `stable`).
+      VIEWW_EXPORT_INSTALL_TARGETS: "1"
       SCOPE: ${{ github.event_name == 'push' && 'gate' || inputs.scope }}
-      PACKAGE: ${{ matrix.mode == 'cpu' && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
-      # Tag: everything. Push to main: the failed lists. Manual: the rerun choice.
-      ONLY: ${{ !startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || inputs.rerun == 'failed') && matrix.failed || '' }}
+      PACKAGE: ${{ matrix.mode == 'cpu' && !matrix.export-only && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
+      # Tag: everything (except the export-only job, which only ever does its
+      # rows). Push to main: the failed lists. Manual: the rerun choice.
+      ONLY: ${{ (matrix.export-only && matrix.failed) || (!startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || inputs.rerun == 'failed') && matrix.failed) || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -136,6 +156,42 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # ── Studio export route (G2.7-G2.11) ─────────────────────────────────
+      # The Android SDK and NDK come with every hosted image (ci-runner-prep.sh
+      # keeps them); these add what the images lack or version loosely.
+      - name: JDK 17 (Android Gradle Plugin 8)
+        if: matrix.mode == 'cpu'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Gradle 8.9 (a scaffolded project has no wrapper JAR)
+        if: matrix.mode == 'cpu'
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: cargo-ndk
+        if: matrix.mode == 'cpu'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: MinGW-w64 (Windows .exe cross-build from Linux)
+        if: matrix.mode == 'cpu' && matrix.os == 'linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64
+
+      - name: Android environment
+        if: matrix.mode == 'cpu'
+        run: |
+          # The newest NDK the image has; cargo-ndk and Studio both read
+          # ANDROID_NDK_HOME, which some images point at an older one.
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" >> "$GITHUB_ENV"
+          echo "NDK: $ndk"; echo "SDK: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
       - name: Vulkan loader + MoltenVK (macOS; stages skip if no device)
         if: matrix.os == 'macos'
         run: brew install molten-vk vulkan-loader vulkan-tools || true
@@ -143,7 +199,7 @@ jobs:
       - name: Release gate
         if: env.SCOPE == 'gate'
         run: |
-          args=(--mode "${{ matrix.mode }}" --out "target/release-gate/${{ matrix.os }}-${{ matrix.mode }}")
+          args=(--mode "${{ matrix.mode }}" --out "target/release-gate/${{ matrix.id }}")
           [[ "$PACKAGE" == true ]] || args+=(--skip-package)
           if [[ -n "$ONLY" ]]; then
             echo "rerunning only: $ONLY"
@@ -157,13 +213,13 @@ jobs:
       - name: Failures with logs
         if: always() && env.SCOPE == 'gate'
         run: |
-          run="target/release-gate/${{ matrix.os }}-${{ matrix.mode }}"
+          run="target/release-gate/${{ matrix.id }}"
           [[ -f "$run/rows.tsv" ]] || { echo "no run folder"; exit 0; }
           py=$(command -v python3 || command -v python)
           "$py" ci/release/report-failures.py "$run" -o "$run/FAILURES.md"
           cat "$run/FAILURES.md"
           {
-            echo "# ${{ matrix.os }} (${{ matrix.mode }})"
+            echo "# ${{ matrix.id }}"
             cat "$run/FAILURES.md"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -175,8 +231,8 @@ jobs:
         if: always() && env.SCOPE == 'gate'
         uses: actions/upload-artifact@v4
         with:
-          name: gate-${{ matrix.os }}-${{ matrix.mode }}
-          path: target/release-gate/${{ matrix.os }}-${{ matrix.mode }}
+          name: gate-${{ matrix.id }}
+          path: target/release-gate/${{ matrix.id }}
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: warn
@@ -185,7 +241,7 @@ jobs:
         if: always() && env.SCOPE == 'gate' && env.PACKAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: installers-${{ matrix.os }}
+          name: installers-${{ matrix.id }}
           path: |
             target/package/viewwstudio-*
             target/package/SHA256SUMS

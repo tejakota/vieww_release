@@ -179,7 +179,7 @@ pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
 	else
 		echo "vulkan=not found (vulkaninfo missing)"
 	fi
-	echo "rustc=$(rustc --version 2>&1 | head -1)"
+	echo "rustc=$(rustc --version 2>/dev/null | head -1)"
 	echo "cargo=$(cargo --version 2>&1 | head -1)"
 	echo "toolchain_pinned=$pinned"
 	echo "version=$version"
@@ -207,6 +207,9 @@ if [[ -n "$free_kb" ]]; then
 	echo "disk_free_gb=$free_gb" >>"$out/host.txt"
 	need_gb=30
 	[[ "$mode" == gpu ]] && need_gb=10
+	# A partial rerun builds a fraction of the tree (the export route alone is
+	# a few GB); the full-gate figure would fail small hosted runners for nothing.
+	[[ -n "$only" ]] && ((need_gb > 15)) && need_gb=15
 	[[ "$VIEWW_LEAN" == 1 ]] || need_gb=100
 	[[ -n "$keep_builds" ]] && need_gb=$((need_gb + 20))
 	if ((free_gb < need_gb)); then
@@ -228,12 +231,14 @@ fi
 if rustc --version 2>/dev/null | grep -q " $pinned "; then
 	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" PASS host.txt
 else
-	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" "FAIL($(rustc --version 2>&1 | head -1))" host.txt
+	note G0.3 "rustc matches rust-toolchain.toml ($pinned)" "FAIL($(rustc --version 2>/dev/null | head -1))" host.txt
 fi
 if [[ "$mode" != gpu ]]; then
 row G0.4 "release-clean (no patch leftovers, stale evidence, local paths)" bash ci/check/release-clean-check.sh "$root"
 if git rev-parse --git-dir >/dev/null 2>&1; then
-	row G0.5 "git working tree clean" bash -c 'st=$(git status --porcelain); [[ -z "$st" ]] || { echo "changed or untracked files:"; echo "$st" | head -40; exit 1; }'
+	# target/ is excluded: this gate is writing its own run folder there. Whether
+	# target/ is *ignored* (a committed .gitignore) is checked by G0.4.
+	row G0.5 "git working tree clean" bash -c 'st=$(git status --porcelain -- . ":(exclude)target"); [[ -z "$st" ]] || { echo "changed or untracked files:"; echo "$st" | head -40; exit 1; }'
 else
 	note G0.5 "git working tree clean" "FAIL(not a git checkout — certify from the tagged commit)" ""
 fi
@@ -243,7 +248,7 @@ row G0.7 "no private keys or credentials in the tree" bash -c '
 		-e "-----BEGIN [A-Z ]*PRIVATE KEY-----" \
 		-e "AKIA[0-9A-Z]{16}" -e "gh[pousr]_[A-Za-z0-9]{36}" -e "xox[baprs]-[A-Za-z0-9-]{10,}" .'
 if command -v cargo-deny >/dev/null; then
-	row G0.8 "cargo deny check all" cargo deny check all
+	row G0.8 "cargo deny check all" cargo deny check --hide-inclusion-graph all
 else
 	note G0.8 "cargo deny check all" "FAIL(cargo-deny not installed: cargo install cargo-deny --locked)" ""
 fi
@@ -325,6 +330,62 @@ fi
 [[ -n "$hidpi" ]] && row G2.3 "desktop suite on a HiDPI display" bash ci/certify/desktop-suite.sh --expect-hidpi
 [[ -n "$multi" ]] && row G2.4 "desktop suite across two displays" bash ci/certify/desktop-suite.sh --expect-multi-monitor
 
+# ── Studio's export route: scaffold → compile every target → real exports ──
+# One run of ci/certify/export-suite.sh answers G2.7-G2.11. Its projects live
+# outside the repository (see that script), under a scratch directory removed
+# afterwards; only results.txt and the logs are kept in the run folder.
+if [[ "$mode" != gpu ]] && { wanted G2.7 || wanted G2.8 || wanted G2.9 || wanted G2.10 || wanted G2.11; }; then
+	export_out="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/vieww-export-check-$stamp"
+	export_args=("$export_out")
+	[[ -n "${VIEWW_EXPORT_INSTALL_TARGETS:-}" ]] && export_args+=(--install-targets)
+	echo "==> G2.7-G2.11 Studio export route (scaffold, compile, export)"
+	bash ci/certify/export-suite.sh "${export_args[@]}" >"$out/logs/export-suite.txt" 2>&1
+	mkdir -p "$out/export"
+	cp "$export_out/results.txt" "$out/export/" 2>/dev/null
+	cp -R "$export_out/logs" "$out/export/" 2>/dev/null
+	[[ "$VIEWW_LEAN" == 1 && -z "$keep_builds" ]] && rm -rf "$export_out"
+	results_file="$out/export/results.txt"
+
+	# export_verdict ROW WHAT PATTERN REQUIRED — fold export-check lines into a row.
+	# REQUIRED=1: a SKIPPED/REFUSED line is not a pass (the host could run it).
+	export_verdict() {
+		local id="$1" what="$2" pattern="$3" required="$4" lines fails skips passes
+		if [[ ! -f "$results_file" ]]; then
+			note "$id" "$what" "FAIL(export suite produced no results; see logs/export-suite.txt)" logs/export-suite.txt
+			return
+		fi
+		lines=$(grep -E "^export-check: ($pattern) " "$results_file")
+		fails=$(echo "$lines" | grep -c ' FAIL' || true)
+		skips=$(echo "$lines" | grep -E ' (SKIPPED|REFUSED) ' | sed -E 's/^export-check: ([^ ]+) (SKIPPED|REFUSED) (.*)$/\1: \3/' | paste -sd ';' -)
+		passes=$(echo "$lines" | grep -c ' PASS' || true)
+		if [[ -z "$lines" ]]; then
+			note "$id" "$what" "NOT RUN" export/results.txt
+		elif ((fails > 0)); then
+			note "$id" "$what" "FAIL($(echo "$lines" | grep ' FAIL' | head -2 | cut -c15-220 | paste -sd ';' -))" export/results.txt
+		elif [[ -n "$skips" && "$required" == 1 ]]; then
+			note "$id" "$what" "SKIPPED(${skips:0:300})" export/results.txt
+		elif ((passes > 0)); then
+			note "$id" "$what" "PASS" export/results.txt
+		else
+			note "$id" "$what" "SKIPPED(${skips:0:300})" export/results.txt
+		fi
+	}
+	# Which cross targets each host is expected to be able to compile.
+	case "$os" in
+	macos) compile_pattern='compile/(desktop|android|windows|ios|ios-sim)-[a-z]+' ;;
+	*) compile_pattern='compile/(desktop|android|windows)-[a-z]+' ;;
+	esac
+	export_verdict G2.7 "scaffolded Rust + Say projects compile for every target" "$compile_pattern" 1
+	export_verdict G2.8 "Studio export: desktop binary" 'export/desktop' 1
+	export_verdict G2.9 "Studio export: Windows .exe" 'export/windows' 1
+	export_verdict G2.10 "Studio export: Android .apk (cargo-ndk + Gradle)" 'export/android' 1
+	if [[ "$os" == macos ]]; then
+		export_verdict G2.11 "Studio export: iOS simulator .app" 'export/ios-sim' 1
+	else
+		note G2.11 "Studio export: iOS simulator .app" "N/A(macOS only — Apple's toolchain)" ""
+	fi
+fi
+
 # ── Gate 3 / 8: artifacts and integrity ──────────────────────────────────────
 if [[ "$mode" == gpu ]]; then
 	: # installers are CPU work; the CPU pass or CI builds them
@@ -369,7 +430,11 @@ if [[ -z "$keep_evidence" && -f "$out/cert/quality/stages.txt" ]]; then
 		find "$dir" -type f ! -name '*.txt' ! -name '*.json' ! -name '*.md' ! -name '*.csv' -delete
 		find "$dir" -type d -empty -delete
 	done <"$out/cert/quality/stages.txt"
-	grep -qE '^gpu[/\\]census[[:space:]]+PASS' "$out/cert/quality/stages.txt" && rm -rf "$out/cert/gpu/census-out"
+	# The census diffs are the only way to see a failed census gate; keep them then.
+	if grep -qE '^gpu[/\\]census[[:space:]]+PASS' "$out/cert/quality/stages.txt" &&
+		! grep -qiE 'census.*FAIL' "$out/cert/quality/stages.txt"; then
+		rm -rf "$out/cert/gpu/census-out"
+	fi
 fi
 echo "gate: disk after: $(vieww_disk "$root"), evidence $(du -sh "$out" 2>/dev/null | cut -f1)"
 

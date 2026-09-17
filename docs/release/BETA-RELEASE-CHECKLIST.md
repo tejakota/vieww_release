@@ -19,15 +19,16 @@ This beta is certified with the machines at hand:
 | Windows, CPU pass | GitHub-hosted runner | Actions → **release-gate** → Run workflow |
 | macOS, CPU pass | GitHub-hosted runner | Same workflow run as Windows |
 | macOS, GPU pass (Apple paravirtual GPU through MoltenVK) | GitHub-hosted runner | Same workflow run. Pixels are valid evidence; timings are not. |
+| Linux export route (Android `.apk`, Windows cross `.exe`) | GitHub-hosted Ubuntu runner | Same workflow run, job `linux-export`. Your laptop's gate also runs it if the Android toolchain is installed. |
 | Windows / macOS GPU and real windows | A real PC and Mac, if one can be borrowed | `ci/vieww gate --mode gpu`; otherwise WAIVED (see B15) |
 
 1. Freeze a commit and tag it as a candidate. Every run must come from that exact commit, and G0.12 checks it.
 2. **Linux:** run `ci/vieww gate --mode cpu`, then `ci/vieww gate --mode gpu`. Keep the laptop plugged in and don't use it heavily while the timing suites run.
-3. **Windows and macOS:** push the tag, or run the workflow by hand. It uploads `gate-windows-cpu`, `gate-macos-cpu`, `gate-macos-gpu`, the installers, and a merged `checklist-ci`.
+3. **Windows and macOS:** push the tag, or run the workflow by hand. It uploads `gate-windows-cpu`, `gate-macos-cpu`, `gate-macos-gpu`, `gate-linux-export`, the installers, and a merged `checklist-ci` that also contains every log.
 4. **Merge** the downloaded run folders with the Linux ones:
 
    ```bash
-   ci/vieww checklist target/release-gate/linux-cpu-*/ target/release-gate/linux-gpu-*/ gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ -o CHECKLIST.md
+   ci/vieww checklist target/release-gate/linux-cpu-*/ target/release-gate/linux-gpu-*/ gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ gate-linux-export/ -o CHECKLIST.md
    ```
 
 5. Do the **[manual]** rows by hand on the installed packages.
@@ -146,6 +147,39 @@ Columns: Linux CPU · Linux GPU · Windows CPU · Windows GPU · macOS CPU · ma
 | G2.5 | [manual] Window: move, resize, minimize, restore, close. Dialogs and child windows behave. Exits with no hang. | ☐ | ☐ | ☐ |
 | G2.6 | [manual] OS conventions: ⌘ on macOS and Ctrl elsewhere. Native clipboard round-trip. File picker. Data dir: Linux `$XDG_DATA_HOME` or `~/.local/share`; Windows `%APPDATA%`; macOS `~/Library/Application Support`. | ☐ | ☐ | ☐ |
 
+### 2.1 Studio's export route: desktop, Windows, Android, iOS
+
+This is what a user's **Export** button runs, not the framework's own examples. `ci/vieww gate` runs `ci/certify/export-suite.sh`, which:
+
+1. Scaffolds a Rust project and a Say project exactly as New Project does.
+2. Compiles both for every target.
+3. Runs Studio's own export plans and checks each produced its file.
+
+The projects are built **outside the repository**, like a user's project, so this repo's `.cargo/config.toml` can't affect them. A missing toolchain is recorded as SKIPPED with the install command Studio would show. The hosted CI jobs install everything needed.
+
+**Toolchains each export needs**
+
+| Export | Needs | Hosted CI job |
+|---|---|---|
+| Desktop binary | cargo | all |
+| Windows `.exe` | Windows: nothing extra. Linux/macOS: MinGW-w64 + `rustup target add x86_64-pc-windows-gnu` | windows-cpu (native), linux-export (cross) |
+| Android `.apk` | Android SDK (`ANDROID_HOME`), NDK (`ANDROID_NDK_HOME`), JDK 17, Gradle 8.7+, `cargo install cargo-ndk`, `rustup target add aarch64-linux-android` | linux-export, windows-cpu, macos-cpu |
+| iOS simulator `.app` | macOS, Xcode, `rustup target add aarch64-apple-ios-sim` | macos-cpu |
+| iOS device `.ipa` | The above, plus an Apple signing identity | manual (G2.13) |
+
+A scaffolded project pins `channel = "stable"`, so on your own machine add those targets for `stable` as well, e.g. `rustup target add --toolchain stable aarch64-linux-android`.
+
+| ID | Check | Linux | Windows | macOS |
+|---|---|:-:|:-:|:-:|
+| G2.7 | [auto] Scaffolded Rust and Say projects compile for desktop, Android and Windows, plus iOS on macOS (`cargo check --target`) | ☐ | ☐ | ☐ |
+| G2.8 | [auto] Export → desktop binary is produced | ☐ | ☐ | ☐ |
+| G2.9 | [auto] Export → Windows `.exe` is produced (native on Windows, MinGW cross elsewhere) | ☐ | ☐ | ☐ |
+| G2.10 | [auto] Export → Android `.apk` is produced (cargo-ndk + Gradle) | ☐ | ☐ | ☐ |
+| G2.11 | [auto] Export → iOS simulator `.app` is produced | N/A | N/A | ☐ |
+| G2.12 | [manual] The exported `.apk` installs and launches on an arm64 phone (developer mode), and the `.app` launches in the iOS simulator (`xcrun simctl install booted …`) | ☐ | ☐ | ☐ |
+| G2.13 | [manual] Signed iOS `.ipa` from a machine with an Apple developer identity (see B3) | N/A | N/A | ☐ |
+| G2.14 | [manual] The same exports from an **installed** Studio, not a checkout (see B16) | ☐ | ☐ | ☐ |
+
 ## Gate 3: Packaged build and install
 
 | ID | Check | Linux | Windows | macOS |
@@ -174,7 +208,7 @@ Run the **installed** app. Columns: Linux · Windows · macOS
 | G4.1 | Launch from installed location; startup; main window renders | ☐ | ☐ | ☐ |
 | G4.2 | Create or open a workspace, edit, save, reopen | ☐ | ☐ | ☐ |
 | G4.3 | **Preview/guest build using the installed SDK bundle** (not the checkout) | ☐ | ☐ | ☐ |
-| G4.4 | Export/package path | ☐ | ☐ | ☐ |
+| G4.4 | Export sheet from the installed app: desktop, and Android where its toolchain is installed (G2.14) | ☐ | ☐ | ☐ |
 | G4.5 | Clipboard, file picker, theme switch, resize and DPI | ☐ | ☐ | ☐ |
 | G4.6 | Quit and relaunch: session and settings restored | ☐ | ☐ | ☐ |
 
@@ -250,7 +284,7 @@ Record **release-hardware** numbers separately from headless results. The measur
 
 | ID | Sev | Description | Fix | Status |
 |---|---|---|---|---|
-| B1 | **P0** | **MoltenVK is not bundled in the macOS `.app`.** Without the Vulkan SDK installed, Studio cannot open a window on a user's Mac. The instance and device portability flags needed for MoltenVK were added in this pass, but have **not been run on a Mac yet**. | Copy `libMoltenVK.dylib` into `Contents/Frameworks` and `MoltenVK_icd.json` into `Contents/Resources/vulkan/icd.d`. Point the loader at them, or load MoltenVK directly with `ash::Entry::load_from`. Verify with G3.2 and G3.4 on a clean Mac. | Open |
+| B1 | **P0** | **MoltenVK is not bundled in the macOS `.app`.** Without the Vulkan SDK installed, Studio cannot open a window on a user's Mac. The instance and device portability flags needed for MoltenVK were added in this pass, but have **not been run on a Mac yet**. | Copy `libMoltenVK.dylib` into `Contents/Frameworks` and `MoltenVK_icd.json` into `Contents/Resources/vulkan/icd.d`. `vieww_hal::vulkan::load_entry` now looks there first (`Contents/Frameworks/libvulkan.1.dylib`, then `libMoltenVK.dylib`), then in `$VULKAN_SDK` and Homebrew. The remaining work is copying those files in `package.sh`. Verify with G3.2 and G3.4 on a clean Mac. | Open |
 | B2 | P0 for public, P2 for dev preview | Windows artifacts are unsigned (SmartScreen warning) | Authenticode certificate plus a `signtool` step, or WAIVE with disclosure | Open |
 | B3 | P0 for public, P2 for dev preview | macOS artifacts are neither signed nor notarized. Gatekeeper blocks the first launch. | Developer ID, Hardened Runtime, `notarytool`, staple, or WAIVE with disclosure | Open |
 | B4 | P1 | No `CHANGELOG.md` and no release notes | Fill in `RELEASE-NOTES-TEMPLATE.md` | Open |
@@ -265,6 +299,12 @@ Record **release-hardware** numbers separately from headless results. The measur
 | B13 | P2 | Layout overflow warnings while Studio runs: `RenderRow` overflowed by 9 px (release_check) and by up to 73 px (walkthrough); `RenderColumn` overflowed by 41 px in the desktop demo. | Review in G2.2; fix or accept | Open |
 | B14 | P2 | On a pure Wayland session with no XWayland, the clipboard does not work: `arboard` is built without Wayland data-control. | Document it, or enable `arboard`'s `wayland-data-control` feature and test on GNOME and KDE | Open |
 | B15 | P1 | **No real Windows or Mac in the test plan.** Hosted CI runners have no GPU and no Vulkan driver, so Studio cannot open a window there. Automated builds, tests and installers are covered, but "the installed app opens and works" (G1.10, G3.2–G3.4, G4) is not, on either OS. | Borrow one Windows PC (any GPU with a current driver) and one Mac for an hour each: install the CI-built installer and do G3.2 + G4. Run `ci/vieww gate --mode gpu` there if Rust is installed. Otherwise WAIVE for a Linux-first developer preview and say so in the release notes. | Open |
+| B16 | **P0 for exports** | **A project created by an installed Studio cannot be built.** New Project writes `vieww = { path = <checkout> }` only when the Studio binary finds the source checkout it was compiled from (`scaffold::checkout_root`, a compile-time path). On a user's machine that path doesn't exist, so the project gets `vieww = "0.0.1"`. No such crate is on crates.io, and the workspace version is 0.1.0. Preview still works (it uses the bundled SDK), but `cargo build`, Export and every mobile build fail with a dependency resolution error. Invisible on a developer machine, where the checkout exists. | Publish the vieww crates at the workspace version and scaffold that version, or ship the crate sources in the SDK bundle and scaffold a path to them. Verify with G2.14. | Open |
+| B17 | P1 | **Android templates did not compile.** The Say template called `run_android(mount, android)` with its arguments swapped, and both templates called `log::error!` without depending on `log`. Hidden because those lines are `#[cfg(target_os = "android")]`, which no desktop build compiles. | **Fixed** in this tree, with a regression test (`the_mobile_entry_points_match_the_platform_api`) and a real Android compile in G2.7. Confirm on CI. | Fixed, awaiting CI |
+| B18 | P1 | **iOS simulator export could not work.** It demanded a signing identity (simulator builds don't need one), and the `.app` stayed in Xcode's DerivedData, so the export folder never got the file. | **Fixed**: identity only required for `.ipa`; `xcodebuild` writes into the export folder. Confirm with G2.11 on macOS CI. | Fixed, awaiting CI |
+| B19 | P2 | Android export builds `arm64-v8a` only, so it won't install on an x86_64 emulator on an Intel/AMD PC. | Document, or add `x86_64` to the `cargo ndk -t` list and `abiFilters` | Open |
+| B20 | P2 | The scaffold pins `channel = "stable"`, but Studio's Toolchains view checks the targets of Studio's own toolchain (1.98.1 here). A user can see "ready" and still have the export fail with a missing target for `stable`. | Pin the scaffold to the Studio's exact version, or check targets inside the project directory | Open |
+| B21 | P1 | Vulkan compositor diverges on NVIDIA (Tesla T4, Linux): 10/17 parity tests fail — every test that runs a post pass (layers, blur, blend, shadow, mask); plain draws, gradients, images and strokes pass; a steady frame renders differently the second time; workload parity 31%, census flat-region mismatch. lavapipe passes 17/17 with 0 core validation errors. Not user-facing today (Studio presents CPU pixels, B10), but blocks G1.5/G1.6. | Shader image loads are now bounds-checked (naga `ReadZeroSkipWrite`) to remove one class of driver-dependent UB; `certify` re-runs a failing suite under the Khronos validation layer (`gpu/vulkan-validation.txt`). Re-run `ci/vieww gate --mode gpu` on NVIDIA with `vulkan-validationlayers` installed and fix what it names | Open |
 
 ---
 
@@ -300,7 +340,7 @@ Paste `host.txt` from each gate run.
 | 8 Supply chain | ☐ | | |
 | 9 Signing / trust | ☐ | | |
 | 10 Publishing | ☐ | | |
-| Blockers B1–B15 closed or waived | ☐ | | |
+| Blockers B1–B21 closed or waived | ☐ | | |
 
 **BETA RELEASE: APPROVED / NOT APPROVED**
 

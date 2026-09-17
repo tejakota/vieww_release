@@ -195,7 +195,7 @@ fi
 # hears of one is a report from a user. See `deny.toml` for the policy.
 if command -v cargo-deny >/dev/null 2>&1; then
 	stage "licences and advisories"
-	check cargo deny check all
+	check cargo deny check --hide-inclusion-graph all
 else
 	stage "licences and advisories — skipped, cargo-deny not installed"
 	echo "  install it to check locally: cargo install cargo-deny"

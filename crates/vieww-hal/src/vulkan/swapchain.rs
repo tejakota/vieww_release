@@ -123,8 +123,7 @@ impl VulkanDevice {
             .map_err(|e| VulkanError::Vulkan(format!("no window handle: {e}")))?
             .as_raw();
 
-        let entry =
-            unsafe { ash::Entry::load() }.map_err(|e| VulkanError::Loading(e.to_string()))?;
+        let entry = super::load_entry()?;
 
         let required = ash_window::enumerate_required_extensions(display_handle)
             .map_err(|e| VulkanError::Vulkan(format!("required surface extensions: {e}")))?;

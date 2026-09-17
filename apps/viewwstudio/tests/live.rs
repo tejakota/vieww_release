@@ -66,6 +66,9 @@ fn workspace_with_live(name: &str, source: Option<&str>) -> std::path::PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
+    // Canonical for the same reason as tests/saving.rs: the studio canonicalizes
+    // a workspace root, and macOS's temp directory is behind a symlink.
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
     std::fs::write(root.join("screen.rs"), "pub fn screen() {}\n").unwrap();
     if let Some(source) = source {
         std::fs::write(viewwstudio::livedoc::path_in(&root), source).unwrap();

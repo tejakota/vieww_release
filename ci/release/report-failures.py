@@ -35,6 +35,40 @@ def tail(path: pathlib.Path, n: int = TAIL) -> str:
     return more + body
 
 
+ERROR = re.compile(
+    r"panicked at|^---- .* stdout ----|^error(\[[^\]]+\])?:|^warning\[|test result: FAILED|"
+    r"^failures:|FAILED|No such file|not found|denied|refused|Segmentation|signal \d+|"
+    r"(advisories|bans|licenses|sources) (ok|FAILED)"
+)
+
+
+def excerpt(path: pathlib.Path, limit: int = 90) -> str:
+    """The error-shaped lines of a log, each with a little context after it.
+
+    A tail shows how a log ended, which for `cargo test` is a summary and for
+    `cargo deny` is nine thousand lines of dependency tree. The cause is earlier:
+    a panic message, an `error[...]` header, a failing test's name.
+    """
+    if not path.is_file():
+        return ""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    keep: list[str] = []
+    skip_until = -1
+    for i, line in enumerate(lines):
+        if i <= skip_until or not ERROR.search(line):
+            continue
+        # An error header's explanation follows it; an inclusion graph does not help.
+        after = 6 if re.match(r"^(error|warning)\[|.*panicked at|^---- ", line) else 0
+        chunk = [l for l in lines[i : i + 1 + after] if not re.match(r"^\s*[│├└]", l)]
+        keep.extend(l[:WIDTH] for l in chunk)
+        keep.append("")
+        skip_until = i + after
+        if len(keep) >= limit:
+            keep.append("… more errors in the full log")
+            break
+    return "\n".join(keep).strip()
+
+
 def block(title: str, text: str) -> str:
     return f"<details><summary>{title}</summary>\n\n```text\n{text.replace('```', '` ` `')}\n```\n\n</details>\n"
 
@@ -53,7 +87,10 @@ def report(run: pathlib.Path) -> tuple[str, int]:
         failures += 1
         out.append(f"#### ❌ {row_id} — {what}\n\n`{verdict}`\n")
         if evidence.startswith("logs/"):
-            out.append(block(f"end of {evidence}", tail(run / evidence)))
+            ex = excerpt(run / evidence)
+            if ex:
+                out.append(block(f"errors in {evidence}", ex))
+            out.append(block(f"end of {evidence}", tail(run / evidence, 25)))
         if row_id == "G1.1":
             log = run / "logs" / "G1.1.txt"
             if log.is_file():
@@ -90,7 +127,10 @@ def report(run: pathlib.Path) -> tuple[str, int]:
                     out.append(f"- certification stage **{rel}**: `{v}`\n")
                     log = run / "cert" / f"{rel}.txt"
                     if log.is_file():
-                        out.append(block(f"end of cert/{rel}.txt", tail(log)))
+                        ex = excerpt(log)
+                        if ex:
+                            out.append(block(f"errors in cert/{rel}.txt", ex))
+                        out.append(block(f"end of cert/{rel}.txt", tail(log, 25)))
     if failures == 0:
         out.append("No failed rows.\n")
     return "\n".join(out), failures

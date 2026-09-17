@@ -509,6 +509,12 @@ vieww = {vieww}
 # only an application needs a platform.
 vieww-platform-winit = {platform}
 
+# `android_main` in `src/lib.rs` reports a failed start through `log`, which on
+# a phone is the only output there is (`vieww-platform-winit` routes it to
+# logcat). Android-only, because nowhere else calls it.
+[target.'cfg(target_os = "android")'.dependencies]
+log = "0.4"
+
 # **One crate, three shapes, and none of them is optional.**
 #
 # `rlib` is the desktop binary below and anything that tests this crate.
@@ -794,7 +800,7 @@ pub fn run() {{
 #[cfg(target_os = "android")]
 #[no_mangle]
 fn android_main(android: vieww_platform_winit::AndroidApp) {{
-    if let Err(error) = app().run_android(mount, android) {{
+    if let Err(error) = app().run_android(android, mount) {{
         log::error!("{name} failed to start: {{error}}");
     }}
 }}
@@ -1684,6 +1690,37 @@ mod tests {
     /// The Say scaffold's gate: the home.say a Say project starts with must
     /// compile, or the kind card's promise ("a screen that already renders")
     /// is false on the very first Render.
+    /// The Android and iOS entry points are behind `#[cfg(target_os)]`, so no
+    /// desktop build compiles them; these are the two defects that shipped
+    /// there, pinned by text. The real compile is `examples/export_check.rs`
+    /// (`cargo check --target aarch64-linux-android`), which needs the target.
+    #[test]
+    fn the_mobile_entry_points_match_the_platform_api() {
+        for kind in [ProjectKind::Rust, ProjectKind::Say] {
+            let files = files_for("app", &dependency(), kind);
+            let get = |p: &str| {
+                files
+                    .iter()
+                    .find(|(path, _)| path == &PathBuf::from(p))
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_default()
+            };
+            let lib = get("src/lib.rs");
+            let manifest = get("Cargo.toml");
+            // `App::run_android(self, android: AndroidApp, build: F)`.
+            assert!(
+                lib.contains("run_android(android, mount)"),
+                "{kind:?}: android_main must call run_android(android, mount)"
+            );
+            if lib.contains("log::") {
+                assert!(
+                    manifest.lines().any(|l| l.trim_start().starts_with("log ")),
+                    "{kind:?}: src/lib.rs uses log:: but Cargo.toml does not depend on log"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_say_scaffold_compiles() {
         let result = vieww_say_codegen::compile("home.say", HOME_SAY);

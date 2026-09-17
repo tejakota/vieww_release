@@ -69,6 +69,14 @@ while IFS= read -r member; do
 	[[ -f "$member/Cargo.toml" ]] || report "workspace member without a manifest: $member"
 done < <(sed -n '/^members = \[/,/^\]/p' Cargo.toml | grep -o '"[^"]*"' | tr -d '"')
 
+# The build directory must be ignored by git. Hidden files are the ones that go
+# missing when a tree is copied or uploaded by hand — `.cargo/config.toml` did
+# once, and `.gitignore` did on the first CI run, where every checkout showed
+# `?? target/` as soon as anything was built.
+if [[ ! -f .gitignore ]] || ! grep -qE '^/?target/?$' .gitignore; then
+	report "missing .gitignore, or it does not ignore /target (hidden files are easy to lose when a tree is uploaded; commit it)"
+fi
+
 # Required configuration that packagers tend to drop with hidden directories.
 if ! grep -q 'prefer-dynamic' .cargo/config.toml 2>/dev/null; then
 	report "missing .cargo/config.toml (or it lacks -C prefer-dynamic): viewwstudio's panic boundary and the mobile runners depend on it"

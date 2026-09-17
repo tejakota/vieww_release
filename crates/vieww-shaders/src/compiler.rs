@@ -125,7 +125,20 @@ impl ParsedShader {
         stage: ShaderStage,
     ) -> Result<Vec<u32>, CompileError> {
         self.find_entry_point(entry_point, stage)?;
-        let mut writer = naga::back::spv::Writer::new(&naga::back::spv::Options::default())
+        // Bounds-checked image loads: naga's default leaves an out-of-range
+        // `textureLoad` unchecked, which is undefined behaviour that software
+        // rasterisers happen to forgive and real drivers do not. Out of range
+        // reads as transparent — what the CPU compositor does.
+        let options = naga::back::spv::Options {
+            bounds_check_policies: naga::proc::BoundsCheckPolicies {
+                index: naga::proc::BoundsCheckPolicy::Restrict,
+                buffer: naga::proc::BoundsCheckPolicy::Restrict,
+                image_load: naga::proc::BoundsCheckPolicy::ReadZeroSkipWrite,
+                binding_array: naga::proc::BoundsCheckPolicy::Restrict,
+            },
+            ..naga::back::spv::Options::default()
+        };
+        let mut writer = naga::back::spv::Writer::new(&options)
             .map_err(|e| CompileError::Backend {
                 target: "spir-v",
                 message: e.to_string(),

@@ -77,6 +77,87 @@ impl std::fmt::Debug for VulkanDevice {
 
 impl super::sealed::Sealed for VulkanDevice {}
 
+/// Load the Vulkan loader (or, on macOS, MoltenVK itself).
+///
+/// # Why not just `ash::Entry::load()`
+///
+/// On Linux and Windows the loader is a system library on the default search
+/// path, and `Entry::load` is the whole story. On macOS it never is:
+///
+/// * Homebrew's `vulkan-loader` lives in `/opt/homebrew/lib` (Apple silicon) or
+///   `/usr/local/lib` (Intel), and neither is on `dlopen`'s default path — the
+///   first macOS CI run found a working MoltenVK device with `vulkaninfo` and
+///   then failed every Vulkan stage with `dlopen(libvulkan.dylib): no such
+///   file`, because `vulkaninfo` is linked against the loader by path and this
+///   crate asked for it by name.
+/// * The LunarG SDK sets `VULKAN_SDK` and installs into `$VULKAN_SDK/lib`.
+/// * A shipped `.app` can only rely on what it carries in
+///   `Contents/Frameworks` (blocker B1): either the loader, or MoltenVK
+///   loaded directly — MoltenVK exports the Vulkan entry points itself.
+///
+/// So on macOS this tries the default name first (which honours
+/// `DYLD_LIBRARY_PATH` / `DYLD_FALLBACK_LIBRARY_PATH`), then those places in
+/// that order, and the error names every path it tried.
+///
+/// # Errors
+///
+/// [`VulkanError::Loading`] when no candidate loads.
+pub fn load_entry() -> Result<ash::Entry, VulkanError> {
+    match unsafe { ash::Entry::load() } {
+        Ok(entry) => Ok(entry),
+        Err(error) => load_entry_fallback(error.to_string()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "same signature as the macOS fallback"
+)]
+fn load_entry_fallback(first: String) -> Result<ash::Entry, VulkanError> {
+    Err(VulkanError::Loading(first))
+}
+
+#[cfg(target_os = "macos")]
+fn load_entry_fallback(first: String) -> Result<ash::Entry, VulkanError> {
+    use std::path::{Path, PathBuf};
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        let frameworks = dir.join("../Frameworks");
+        candidates.push(frameworks.join("libvulkan.1.dylib"));
+        candidates.push(frameworks.join("libMoltenVK.dylib"));
+        candidates.push(dir.join("libvulkan.1.dylib"));
+    }
+    if let Some(sdk) = std::env::var_os("VULKAN_SDK") {
+        let sdk = PathBuf::from(sdk);
+        candidates.push(sdk.join("lib/libvulkan.1.dylib"));
+        candidates.push(sdk.join("lib/libvulkan.dylib"));
+    }
+    for prefix in ["/opt/homebrew", "/usr/local"] {
+        candidates.push(Path::new(prefix).join("lib/libvulkan.1.dylib"));
+        candidates.push(Path::new(prefix).join("lib/libMoltenVK.dylib"));
+    }
+    let mut tried = Vec::new();
+    for path in candidates.into_iter().filter(|p| p.is_file()) {
+        match unsafe { ash::Entry::load_from(&path) } {
+            Ok(entry) => return Ok(entry),
+            Err(error) => tried.push(format!("{}: {error}", path.display())),
+        }
+    }
+    let detail = if tried.is_empty() {
+        "no Vulkan loader or MoltenVK found in the app bundle, $VULKAN_SDK, /opt/homebrew/lib \
+         or /usr/local/lib (install the Vulkan SDK, or `brew install vulkan-loader molten-vk`)"
+            .to_owned()
+    } else {
+        format!("also tried {}", tried.join("; "))
+    };
+    Err(VulkanError::Loading(format!("{first}; {detail}")))
+}
+
 impl VulkanDevice {
     /// Bring up a headless Vulkan 1.1 device on the first adapter that
     /// offers a graphics queue — spec §4.3's "Vulkan 1.1 ... Timeline
@@ -84,8 +165,7 @@ impl VulkanDevice {
     /// semaphores, a core 1.2 feature, are always available; nothing here
     /// uses them yet — see the module docs on scope).
     pub fn new() -> Result<Self, VulkanError> {
-        let entry =
-            unsafe { ash::Entry::load() }.map_err(|e| VulkanError::Loading(e.to_string()))?;
+        let entry = load_entry()?;
         let instance = Self::create_instance(&entry, &[])?;
 
         let (physical_device, queue_family) =

@@ -34,6 +34,7 @@ The release process itself is in
 | `wasm` / `coverage` / `size` | `check/…` | Web build, line coverage, binary size budget. |
 | `certify [OUT]` | `certify/certify.sh` (Linux, macOS), `certify/certify-windows.ps1` | Every suite with one verdict. Skipped stages are never passes. |
 | `studio [--quick]` | `certify/release-check.sh` | Runs Studio's `release_check`, `tour` and `walkthrough` headless and builds a screenshot gallery. |
+| `export [OUT] [--compile-only] [--install-targets]` | `certify/export-suite.sh` | Studio's export route. Scaffolds Rust and Say projects outside the repo, compiles them for desktop, Android, Windows and iOS, then runs the Export sheet's own plans: desktop binary, `.exe`, `.apk` (cargo-ndk + Gradle), iOS simulator `.app`. A missing toolchain is SKIPPED with its install command. Gate rows G2.7–G2.11. |
 | `desktop [--expect-hidpi] [--expect-multi-monitor]` | `certify/desktop-suite.sh` | Real windows, clipboard, dialogs and DPI. |
 | `shots [--against DIR]` | `certify/shot-suite.sh` | Every feature example, byte-compared across machines. |
 | `mobile <script>` | `mobile/*.sh` | For example `apk`, `device-suite`, `a11y-android`, `ios-app`, `reload-android`. |
@@ -71,7 +72,7 @@ Options:
 |---|---|---|
 | Linux CPU | Local machine | `ci/vieww gate --mode cpu` |
 | Linux GPU | Same machine, afterwards | `ci/vieww gate --mode gpu`. Only the GPU-dependent rows: device class, Vulkan parity suite, GPU workload, census, desktop suite. It builds a small slice of the workspace. |
-| Windows / macOS CPU, macOS GPU (paravirtual, via MoltenVK) | GitHub-hosted runners | `.github/workflows/release-gate.yml`: run it manually, or push a `v*` tag. It never runs on pull requests. |
+| Windows / macOS CPU, macOS GPU (paravirtual, via MoltenVK), Linux export route (Android SDK/NDK preinstalled) | GitHub-hosted runners | `.github/workflows/release-gate.yml`: run it manually, or push a `v*` tag. It never runs on pull requests. |
 
 Hosted runners have much less free disk than a gate needs, so the workflow first runs `tools/ci-runner-prep.sh`. That script deletes unused SDKs and, on Windows, moves `target/` to the drive with the most room. It refuses to run outside GitHub Actions.
 
