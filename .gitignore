@@ -1,0 +1,28 @@
+# Build output
+/target/
+dist/
+fixtures-out/
+census-out/
+gpu-test-out/
+vieww-standard-out/
+
+# Certification evidence belongs to a run, not to the source tree — see
+# ci/certify/certify.sh's header. The scripts write under target/ by default.
+/cert-linux/
+/cert-macos/
+/cert-windows/
+certification-*.log
+
+# Patch-session leftovers. `ci/check/release-clean-check.sh` fails the release on any
+# of these, so ignoring them here only keeps `git status` readable.
+*.orig
+*.rej
+*.bak
+*.vieww-fix.bak
+*.vieww-validate.bak
+
+# Test-written images for visual inspection (vieww-paint native_parity).
+crates/vieww-paint/tests/output/
+
+# Default output of ci/certify/release-check.sh and shot-suite.sh.
+/out/

@@ -42,6 +42,14 @@ ERROR = re.compile(
 )
 
 
+# A passing test whose *name* happens to contain "refused" or "not_found" is
+# not an error. Without this, a workspace full of `..._is_refused ... ok` tests
+# used the whole excerpt budget and pushed the real clippy and build errors out
+# of the summary — the macOS and Windows G1.1 reports named "FAILED: clippy"
+# and then listed thirty passing tests instead of the lint.
+PASSED = re.compile(r"^test .* \.\.\. (ok|ignored)\b")
+
+
 def excerpt(path: pathlib.Path, limit: int = 90) -> str:
     """The error-shaped lines of a log, each with a little context after it.
 
@@ -55,10 +63,13 @@ def excerpt(path: pathlib.Path, limit: int = 90) -> str:
     keep: list[str] = []
     skip_until = -1
     for i, line in enumerate(lines):
-        if i <= skip_until or not ERROR.search(line):
+        if i <= skip_until or not ERROR.search(line) or PASSED.match(line):
             continue
         # An error header's explanation follows it; an inclusion graph does not help.
-        after = 6 if re.match(r"^(error|warning)\[|.*panicked at|^---- ", line) else 0
+        # Plain `error:` too: clippy's lints print as `error: <message>` with
+        # the `--> file:line` on the next line, and without that line the
+        # summary says a lint failed but not where.
+        after = 6 if re.match(r"^(error|warning)(\[|:)|.*panicked at|^---- ", line) else 0
         chunk = [l for l in lines[i : i + 1 + after] if not re.match(r"^\s*[│├└]", l)]
         keep.extend(l[:WIDTH] for l in chunk)
         keep.append("")
@@ -112,7 +123,15 @@ def report(run: pathlib.Path) -> tuple[str, int]:
                 for stage, body in sections.items():
                     if not any(stage.startswith(f.split(" (exit")[0]) for f in failed):
                         continue
-                    hits = [l[:WIDTH] for l in body if pattern.search(l)][:80]
+                    hits = []
+                    for n, l in enumerate(body):
+                        if not pattern.search(l) or PASSED.match(l):
+                            continue
+                        hits.append(l[:WIDTH])
+                        # Keep a diagnostic's location and the source line it points at.
+                        if re.match(r"^(error|warning)(\[|:)", l):
+                            hits.extend(x[:WIDTH] for x in body[n + 1 : n + 4] if x.strip())
+                    hits = hits[:120]
                     if hits:
                         out.append(block(f"errors in stage: {stage}", "\n".join(hits)))
         if row_id == "G1.3":

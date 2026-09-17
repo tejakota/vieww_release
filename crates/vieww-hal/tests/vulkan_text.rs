@@ -71,8 +71,15 @@ fn try_renderer() -> Option<(Exclusive, VulkanDevice, SceneRenderer)> {
 /// fractional baseline positions that are the whole reason the glyph cache
 /// keys on sub-pixel phase. Hand-assembling a `GlyphRun` with round numbers
 /// would test the one case where phase cannot go wrong.
+///
+/// The fonts are the embedded ones, not the system's. This file compares the
+/// GPU with the CPU rasterizer, and which face a system scan resolves "sans
+/// serif" to is not part of that claim. On the macOS GPU runner it resolved to
+/// a system face that *both* rasterizers drew as nothing, so four tests failed
+/// with blank frames on each side while the GPU path itself was never
+/// exercised.
 fn text_scene(text: &str, at: Offset, color: Color) -> Scene {
-    text_scene_in(&mut FontStore::new(), text, at, color)
+    text_scene_in(&mut FontStore::embedded_only(), text, at, color)
 }
 
 /// [`text_scene`], sharing a caller's font store.
@@ -319,7 +326,7 @@ fn a_repeated_frame_reuses_the_atlas_and_a_new_glyph_grows_it() {
     let clear = Color::rgba(255, 255, 255, 255);
     let mut planner = Planner::new();
 
-    let mut store = FontStore::new();
+    let mut store = FontStore::embedded_only();
     let first_scene = text_scene_in(
         &mut store,
         "abc",
@@ -392,7 +399,7 @@ fn two_colours_share_one_atlas_patch() {
     let clear = Color::rgba(255, 255, 255, 255);
     let mut planner = Planner::new();
 
-    let mut store = FontStore::new();
+    let mut store = FontStore::embedded_only();
     let red_scene = text_scene_in(
         &mut store,
         "same",
