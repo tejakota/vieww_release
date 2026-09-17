@@ -387,9 +387,9 @@ impl Arc {
 
         // A cubic follows a circular quarter closely and a half badly, so the
         // arc is cut until no piece is more than a quarter turn.
-        let count = (swept.abs() / FRAC_PI_2).ceil().max(1.0);
-        let step = swept / count;
-        let count = count as usize;
+        // See `quarter_pieces` for why this is not a bare `ceil`.
+        let count = quarter_pieces(swept);
+        let step = swept / count as f32;
         // The tangent scale that makes a cubic meet a circular segment at both
         // ends with the right slope.
         let reach = (4.0 / 3.0) * (step / 4.0).tan();
@@ -420,6 +420,19 @@ impl Arc {
             angle = next;
         }
     }
+}
+
+/// How many pieces of at most a quarter turn an arc sweeping `swept` radians
+/// is cut into.
+///
+/// The small allowance before `ceil` is load-bearing. A semicircle whose sweep
+/// came from `acos(-1) - TAU` lands one ulp either side of exactly two
+/// quarters depending on the platform's libm — Apple's `acosf(-1)` rounds the
+/// other way from glibc's — and without it macOS cut the same semicircle into
+/// three pieces where Linux cut two. A piece a hair past a quarter turn is
+/// still followed closely by a cubic.
+fn quarter_pieces(swept: f32) -> usize {
+    (swept.abs() / FRAC_PI_2 - 1.0e-4).ceil().max(1.0) as usize
 }
 
 /// A point on the ellipse at `angle`, and the tangent there.
@@ -919,6 +932,28 @@ mod tests {
             "the two arcs must bulge to opposite sides; both went to {}",
             one.dy
         );
+    }
+
+    #[test]
+    fn a_semicircle_is_two_quarters_whichever_way_the_last_ulp_rounds() {
+        // The macOS failure, reproduced on every platform: Apple's `acosf(-1)`
+        // is one ulp below glibc's, so `acos(-1) - TAU` sweeps a hair more
+        // than a half turn.
+        let below_pi = f32::from_bits(std::f32::consts::PI.to_bits() - 1);
+        for swept in [
+            std::f32::consts::PI,
+            -std::f32::consts::PI,
+            below_pi - TAU,
+            TAU - below_pi,
+        ] {
+            assert_eq!(quarter_pieces(swept), 2, "sweep {swept}");
+        }
+        assert_eq!(
+            quarter_pieces(FRAC_PI_2 * 1.01),
+            2,
+            "a real overrun still splits"
+        );
+        assert_eq!(quarter_pieces(TAU), 4);
     }
 
     #[test]

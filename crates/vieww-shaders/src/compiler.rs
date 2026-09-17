@@ -138,8 +138,8 @@ impl ParsedShader {
             },
             ..naga::back::spv::Options::default()
         };
-        let mut writer = naga::back::spv::Writer::new(&options)
-            .map_err(|e| CompileError::Backend {
+        let mut writer =
+            naga::back::spv::Writer::new(&options).map_err(|e| CompileError::Backend {
                 target: "spir-v",
                 message: e.to_string(),
             })?;
