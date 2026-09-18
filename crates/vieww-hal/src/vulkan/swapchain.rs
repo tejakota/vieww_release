@@ -542,7 +542,9 @@ impl VulkanSwapchain {
         width: u32,
         height: u32,
     ) -> Result<(), VulkanError> {
-        unsafe { device.device.queue_wait_idle(device.queue) }
+        // `device_wait_idle`, not `queue_wait_idle`: every queue has to be
+        // done with the images, and a second queue is one refactor away.
+        unsafe { device.device.device_wait_idle() }
             .map_err(|e| VulkanError::Vulkan(e.to_string()))?;
         let surface_loader = self.surface_loader.clone();
         let surface = self.surface;
@@ -559,11 +561,20 @@ impl VulkanSwapchain {
         (self.width, self.height)
     }
 
+    /// **The swapchain goes first, then the semaphore.** `image_available` is
+    /// the semaphore `acquire_next_image` signals, so an acquire that was
+    /// issued and never waited on — every error path between the acquire and
+    /// the submit in `present_pixels` leaves one — still has a signal pending
+    /// against it. Destroying a semaphore in that state is undefined, and
+    /// destroying the swapchain first is what cancels the acquire that owns
+    /// it. The old order crashed NVIDIA's driver inside
+    /// `vkDestroySwapchainKHR` — a jump through a null pointer in
+    /// `libnvidia-glcore` — when the desktop suite closed a window.
     fn destroy_swapchain_only(&mut self, device: &VulkanDevice) {
         unsafe {
-            device.device.destroy_semaphore(self.image_available, None);
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
+            device.device.destroy_semaphore(self.image_available, None);
         }
     }
 }
@@ -584,8 +595,7 @@ impl VulkanSwapchain {
     /// already lost, in which case there is nothing left to destroy safely
     /// anyway.
     pub fn destroy(mut self, device: &VulkanDevice) {
-        unsafe { device.device.queue_wait_idle(device.queue) }
-            .expect("device idle before teardown");
+        unsafe { device.device.device_wait_idle() }.expect("device idle before teardown");
         self.release(device);
     }
 
@@ -611,7 +621,7 @@ impl VulkanSwapchain {
         if self.swapchain == vk::SwapchainKHR::null() && self.surface == vk::SurfaceKHR::null() {
             return;
         }
-        let _ = unsafe { device.device.queue_wait_idle(device.queue) };
+        let _ = unsafe { device.device.device_wait_idle() };
         if self.swapchain != vk::SwapchainKHR::null() {
             self.destroy_swapchain_only(device);
             self.swapchain = vk::SwapchainKHR::null();
