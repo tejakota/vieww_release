@@ -518,7 +518,14 @@ mod tests {
     const ERROR_JSON: &str = r#"{"reason":"compiler-message","message":{"level":"error","message":"cannot find value `x` in this scope","code":{"code":"E0425"},"children":[],"spans":[{"file_name":"src/main.rs","line_start":7,"column_start":13,"is_primary":true}]}}"#;
     const WARN_JSON: &str = r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused variable: `y`","code":{"code":"unused_variables"},"children":[],"spans":[{"file_name":"src/main.rs","line_start":3,"column_start":9,"is_primary":true}]}}"#;
 
+    ///
+    /// **The path is escaped, because a Windows one is full of `\`.** JSON
+    /// reads `\U` in `C:\Users\...` as an escape, so the line cargo would
+    /// have written came out malformed, the artifact was never parsed, and
+    /// `builds.binary` stayed `None` while the test said only that it
+    /// expected `Some(app.bat)`. Real cargo escapes them; so does this.
     fn artifact_json(path: &str) -> String {
+        let path = path.replace('\\', "\\\\");
         format!(
             r#"{{"reason":"compiler-artifact","target":{{"kind":["bin"],"name":"app"}},"executable":"{path}","fresh":false}}"#
         )
