@@ -172,6 +172,87 @@ impl VulkanDevice {
         Ok((device_bundle, swapchain))
     }
 
+    /// A second window's swapchain, on **this** device.
+    ///
+    /// # Why this exists, which is a crash rather than a tidiness argument
+    ///
+    /// [`for_window`](Self::for_window) opens a `VkInstance` and a `VkDevice`
+    /// of its own, so an application with a dialog or a menu window had one
+    /// complete driver per window. Closing one window then ran
+    /// `vkDestroyDevice` and `vkDestroyInstance` while the other windows'
+    /// instances were still live, and a driver's per-process state does not
+    /// survive that: NVIDIA's jumped through a null pointer inside the *next*
+    /// window's `vkDestroySwapchainKHR`, and Mesa's Intel driver reported a
+    /// double free at the same moment. Measured on a GeForce 920MX and on
+    /// Kaby Lake: the desktop suite died on signal 11 both times, and ran to
+    /// 21 checks with 0 failed as soon as nothing was destroyed.
+    ///
+    /// So every window after the first asks the device that already exists
+    /// for a surface. One instance, one device, one driver per process —
+    /// which is also what every other toolkit does, and what makes opening a
+    /// window cost a surface rather than a driver.
+    ///
+    /// # Errors
+    ///
+    /// [`VulkanError::NoAdapter`] if this device's adapter cannot present to
+    /// this window — a caller that gets it should fall back to
+    /// [`for_window`](Self::for_window) — and [`VulkanError::Vulkan`] for any
+    /// other failing Vulkan call.
+    ///
+    /// # Panics
+    ///
+    /// If `width` or `height` is zero.
+    pub fn swapchain_for_window(
+        &self,
+        window: &(impl HasWindowHandle + HasDisplayHandle),
+        width: u32,
+        height: u32,
+    ) -> Result<VulkanSwapchain, VulkanError> {
+        assert!(
+            width > 0 && height > 0,
+            "cannot present into a {width}x{height} window"
+        );
+
+        let display_handle = window
+            .display_handle()
+            .map_err(|e| VulkanError::Vulkan(format!("no display handle: {e}")))?
+            .as_raw();
+        let window_handle = window
+            .window_handle()
+            .map_err(|e| VulkanError::Vulkan(format!("no window handle: {e}")))?
+            .as_raw();
+
+        let surface_loader = ash::khr::surface::Instance::new(&self.entry, &self.instance);
+        let surface = unsafe {
+            ash_window::create_surface(
+                &self.entry,
+                &self.instance,
+                display_handle,
+                window_handle,
+                None,
+            )
+        }
+        .map_err(|e| VulkanError::Vulkan(format!("creating surface: {e}")))?;
+
+        // This adapter was chosen for another window's surface. Usually the
+        // same answer; not guaranteed, so it is asked rather than assumed, and
+        // the surface is destroyed again rather than leaked on a no.
+        let supported = unsafe {
+            surface_loader.get_physical_device_surface_support(
+                self.physical_device,
+                self.queue_family,
+                surface,
+            )
+        }
+        .unwrap_or(false);
+        if !supported {
+            unsafe { surface_loader.destroy_surface(surface, None) };
+            return Err(VulkanError::NoAdapter);
+        }
+
+        VulkanSwapchain::create(self, surface_loader, surface, width, height)
+    }
+
     /// Upload `pixels` (tightly packed straight-alpha RGBA8, exactly
     /// `vieww_paint::native::Pixels::data`'s layout) and present it as the
     /// next frame of `swapchain`. Always a full-frame copy — see the module

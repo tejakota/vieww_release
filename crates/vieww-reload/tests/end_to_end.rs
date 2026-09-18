@@ -116,13 +116,22 @@ impl GuestSource {
         Self { path, original }
     }
 
+    /// Rewrite the guest with `from` replaced by `to`.
+    ///
+    /// **The search runs against a `\n`-normalised copy.** The landmarks below
+    /// span two lines, and a Windows checkout can hold the guest with `\r\n`
+    /// — `.gitattributes` asks for LF, but a clone made before it existed
+    /// still has CRLF — so the landmark was not found and the test failed
+    /// saying the example had changed when it had not. `Drop` still restores
+    /// the file's original bytes, whichever they were.
     fn replace(&self, from: &str, to: &str) {
+        let normalised = self.original.replace("\r\n", "\n");
         assert!(
-            self.original.contains(from),
+            normalised.contains(from),
             "the guest example no longer contains `{from}` — this test edits it \
              to force a rebuild, and needs a landmark that is actually there"
         );
-        std::fs::write(&self.path, self.original.replace(from, to)).expect("writing the guest");
+        std::fs::write(&self.path, normalised.replace(from, to)).expect("writing the guest");
     }
 }
 

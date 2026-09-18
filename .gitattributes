@@ -1,0 +1,17 @@
+# Line endings are part of what this repository tests, so they are pinned.
+#
+# A Windows runner checks out with `core.autocrlf=true` by default, which turned
+# every text file into CRLF on the first Windows CI run. Two things compare
+# source bytes and failed on nothing else:
+#
+# - `vieww-say-codegen`'s `the_counter_fixture_is_current` compares generated
+#   code (LF, by the codegen contract) with the committed `counter_gen.rs`.
+# - `vieww-reload`'s end-to-end test edits `examples/reload-guest/src/lib.rs`
+#   by finding a multi-line landmark written with `\n`.
+#
+# Shell scripts also break under CRLF (`$'\r': command not found`). LF
+# everywhere; `text=auto` leaves the fonts and PNGs alone.
+* text=auto eol=lf
+
+*.ttf binary
+*.png binary
