@@ -1211,7 +1211,14 @@ mod tests {
         let names: Vec<String> = tree
             .files()
             .into_iter()
-            .map(|p| p.strip_prefix(&root).unwrap().display().to_string())
+            // `/` on every platform — see `buffer.rs`'s tree test.
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .display()
+                    .to_string()
+                    .replace('\\', "/")
+            })
             .collect();
         assert!(
             names

@@ -29,7 +29,7 @@
 	plainly that it is not. SmartScreen will warn until `release.yml` is given
 	credentials at the step marked for them.
 
-	Built by `packaging/package.sh --msi`, which passes:
+	Built by `packaging/package.sh` with its msi flag, which passes:
 
 	    -d Version=<workspace version>   -d Payload=<the staged tree>
 -->

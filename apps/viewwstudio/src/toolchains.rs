@@ -903,6 +903,10 @@ mod tests {
     }
 
     #[test]
+    // Windows has no executable bit — a file is a program there because of its
+    // extension — so the middle assertion below is a claim about Unix, and the
+    // test is one too rather than being weakened for both.
+    #[cfg_attr(not(unix), ignore = "the executable bit is a Unix idea")]
     fn cargo_is_found_on_path_and_only_if_it_is_executable() {
         let s = Scratch::new("cargo");
         let bin = s.dir("bin");

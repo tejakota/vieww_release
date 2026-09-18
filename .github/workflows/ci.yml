@@ -6,14 +6,25 @@
 # and installer, with GPU execution and the real-window desktop suite recorded
 # as SKIPPED rather than pretended.
 #
-# Runs on every push to main (failed rows only), on a `v*` tag (full gate), or
-# from the Actions tab ("Run workflow").
+# **Every leg of the sign-off is in this file**, the Linux and Windows
+# self-hosted ones included, so the release gate is described in one place
+# rather than half here and half in somebody's shell history. The `plan` job at
+# the top decides which of them a given run executes, and prints why on the
+# summary page — see the comment above it. The short version:
+#
+#   push to main       hosted legs, each leg's outstanding rows only
+#   `v*` tag           hosted legs, the whole gate, every row
+#   Run workflow       `legs` picks the machines (hosted | all | none | a
+#                      comma list), `rerun` picks failed rows or everything
+#
+# A leg whose `rows` list is empty is skipped on a rerun: that is what keeps a
+# test push from repeating work that already passed.
 # It never runs on pull requests: this repository is public, and a pull request
 # from a fork must not get a multi-hour job, or any job with write access.
 #
 # Results:
-#   gate-windows-cpu, gate-macos-cpu, gate-macos-gpu, gate-linux-export
-#                               run folders (CHECKLIST.md, logs, evidence)
+#   gate-<leg>                  run folders (CHECKLIST.md, logs, evidence)
+#   screenshots-<leg>           five feature and five studio pictures
 #   installers-windows-cpu/-macos-cpu   .msi/.zip, .dmg, SHA256SUMS, MANIFEST.txt
 #   checklist-ci                both runs merged into one CHECKLIST-ci.md
 #                               (also shown on the run's summary page)
@@ -28,9 +39,9 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "gate = everything; checks = fmt/clippy/docs/tests only (faster)"
+        description: "gate = everything; checks = fmt/clippy/docs/tests only; screenshots = just the ten pictures (minutes, no gate)"
         type: choice
-        options: [gate, checks]
+        options: [gate, checks, screenshots]
         default: gate
       rerun:
         description: "failed = only the rows that failed last time (see RERUN LISTS below); all = full gate"
@@ -41,6 +52,10 @@ on:
         description: "Build installers"
         type: boolean
         default: true
+      legs:
+        description: "Which machines: hosted (default) | all | none | a comma list of leg ids (see LEGS below), e.g. windows-cpu,macos-gpu"
+        type: string
+        default: ""
   # A push to main reruns the failed-row lists below (the same as a manual run
   # with rerun=failed); a `v*` tag runs the full gate. A newer push to the same
   # ref cancels the run still in progress (see `concurrency`).
@@ -56,61 +71,237 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── THE GATE AT THE TOP ─────────────────────────────────────────────────
+  #
+  # Every leg of the release sign-off is described below, the Linux ones
+  # included, so this file is the whole picture rather than the part that
+  # happens to run on GitHub's machines. What actually runs is decided here,
+  # once, and the reasons are printed on the run's summary page.
+  #
+  # Three questions, in order:
+  #
+  #  1. **Which machines?** `legs` — `hosted` (the default: GitHub's runners),
+  #     `all` (adds the self-hosted Linux and Windows legs), `none`, or a comma
+  #     list of leg ids. The self-hosted legs are never picked by default: with
+  #     no runner registered for those labels a job queues for six hours and
+  #     then fails, which is worse than not running it.
+  #  2. **Which rows?** `rerun` — `failed` uses each leg's `rows` list below,
+  #     `all` runs the whole gate. A `v*` tag always runs everything: a
+  #     certification with rows carried over from a previous commit is not a
+  #     certification.
+  #  3. **Is there anything left?** A leg whose `rows` list is empty has
+  #     nothing outstanding, so on `rerun: failed` it is skipped rather than
+  #     repeating work that already passed. **That is the dedupe**: as a row
+  #     starts passing, delete it from its leg's list; when the list is empty
+  #     the leg stops running during testing, and still runs in full for the
+  #     tag.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          LEGS: ${{ inputs.legs }}
+          RERUN: ${{ inputs.rerun }}
+          SCOPE_IN: ${{ inputs.scope }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+
+          # ── LEGS ────────────────────────────────────────────────────────
+          # One entry per machine the sign-off needs.
+          #
+          #   hosted     false = a self-hosted runner with these labels, so it
+          #              is opt-in (`legs: all`, or named).
+          #   headless   true  = no display and no GPU: the desktop suite and
+          #              the GPU stages record SKIPPED rather than pretending.
+          #   rows       what `rerun: failed` executes. "" = nothing
+          #              outstanding, so the leg is skipped on a rerun.
+          #              "*" = this leg has never passed anything; run it whole.
+          LEGS = [
+              # Linux, on the machine with a real GPU and a real display. The
+              # only leg that can answer G1.4, G1.5, G1.10 and G1.14 with
+              # hardware rather than a skip.
+              {
+                  "id": "linux-cpu",
+                  "os": "linux",
+                  "runner": ["self-hosted", "linux", "vieww-gate"],
+                  "mode": "cpu",
+                  "hosted": False,
+                  "headless": False,
+                  "rows": "G0.5,G1.1,G1.3,G3.1",
+              },
+              {
+                  "id": "linux-gpu",
+                  "os": "linux",
+                  "runner": ["self-hosted", "linux", "vieww-gate", "gpu"],
+                  "mode": "gpu",
+                  "hosted": False,
+                  "headless": False,
+                  "vk_device": "nvidia",
+                  "rows": "*",
+              },
+              # Outstanding as of the 2026-09-18 run: the studio's tests
+              # spawning `/bin/sh` (G1.1, and G1.3 through the same suite) and
+              # the MSI (G3.1, with G8.1 behind it). Everything else on this
+              # machine has passed.
+              {
+                  "id": "windows-cpu",
+                  "os": "windows",
+                  "runner": "windows-latest",
+                  "mode": "cpu",
+                  "hosted": True,
+                  "headless": True,
+                  "rows": "G1.1,G1.3,G3.1",
+              },
+              # Windows on real hardware: D3D12 and the desktop suite, which
+              # the hosted image cannot run. Opt-in like the Linux legs.
+              {
+                  "id": "windows-gpu",
+                  "os": "windows",
+                  "runner": ["self-hosted", "windows", "vieww-gate", "gpu"],
+                  "mode": "gpu",
+                  "hosted": False,
+                  "headless": False,
+                  "rows": "*",
+              },
+              {
+                  "id": "macos-cpu",
+                  "os": "macos",
+                  "runner": "macos-latest",
+                  "mode": "cpu",
+                  "hosted": True,
+                  "headless": True,
+                  "rows": "",
+              },
+              # Apple's paravirtualized GPU through MoltenVK — the only test of
+              # the Vulkan parity suite and census on that path. Its pixels are
+              # evidence; its timings are not.
+              {
+                  "id": "macos-gpu",
+                  "os": "macos",
+                  "runner": "macos-latest",
+                  "mode": "gpu",
+                  "hosted": True,
+                  "headless": True,
+                  "rows": "",
+              },
+              # The hosted Ubuntu image carries the Android SDK, NDK and JDK a
+              # laptop may not, so the export route is proved here. G2.7-G2.11
+              # passed on 2026-09-18, so the list is empty and reruns skip it;
+              # `rerun: all` and the tag still run it, and `full_rows` is what
+              # it runs then.
+              {
+                  "id": "linux-export",
+                  "os": "linux",
+                  "runner": "ubuntu-latest",
+                  "mode": "cpu",
+                  "hosted": True,
+                  "headless": True,
+                  "export_only": True,
+                  "rows": "",
+                  "full_rows": "G2.7,G2.8,G2.9,G2.10,G2.11",
+              },
+          ]
+
+          event = os.environ["EVENT"]
+          ref = os.environ["REF"]
+          tag = ref.startswith("refs/tags/")
+          wanted = (os.environ.get("LEGS") or "").strip().lower()
+          rerun = (os.environ.get("RERUN") or "").strip() or ("failed" if event == "push" and not tag else "all")
+          # A tag is the certification: everything, on every machine that is
+          # available, whatever the lists say.
+          if tag:
+              rerun = "all"
+
+          if not wanted:
+              wanted = "hosted"
+
+          # `scope: screenshots` takes ten pictures and runs no gate row at
+          # all — minutes rather than hours, for the question "does this
+          # machine draw the product correctly", which is what sent somebody
+          # looking at a macOS build with no text on its buttons. Only the CPU
+          # legs draw them (a GPU leg's pictures would be the same ones), so
+          # the rest are not started.
+          scope = (os.environ.get("SCOPE_IN") or "").strip() or "gate"
+          if os.environ["EVENT"] == "push":
+              scope = "gate"
+
+          chosen, skipped = [], []
+          for leg in LEGS:
+              if scope == "screenshots" and (leg["mode"] != "cpu" or leg.get("export_only")):
+                  skipped.append((leg["id"], "draws no screenshots"))
+                  continue
+              if wanted == "none":
+                  skipped.append((leg["id"], "legs: none"))
+                  continue
+              if wanted == "hosted" and not leg["hosted"]:
+                  skipped.append((leg["id"], "self-hosted; pass legs: all or name it"))
+                  continue
+              if wanted not in ("hosted", "all"):
+                  named = [x.strip() for x in wanted.split(",") if x.strip()]
+                  if leg["id"] not in named:
+                      skipped.append((leg["id"], "not named in legs"))
+                      continue
+
+              rows = leg.get("rows", "*")
+              only = ""
+              if scope == "screenshots":
+                  chosen.append({**leg, "only": "", "export_only": False,
+                                 "vk_device": "", "headless": "1" if leg.get("headless") else ""})
+                  continue
+              # An outstanding list is also what a leg runs on a rerun, so
+              # `linux-cpu`'s list below is this laptop's, not a CI machine's.
+              if rerun == "failed":
+                  if rows == "":
+                      skipped.append((leg["id"], "nothing outstanding (rows is empty)"))
+                      continue
+                  if rows != "*":
+                      only = rows
+              # An export-only leg never runs anything but its own rows, even
+              # in a full run: the rest of the gate is another leg's job, and a
+              # full pass here would build the whole workspace twice.
+              if leg.get("export_only"):
+                  rows_full = leg.get("full_rows") or leg.get("rows")
+                  if rows_full not in ("", "*"):
+                      only = rows_full
+
+              entry = dict(leg)
+              entry["only"] = only
+              entry["export_only"] = bool(leg.get("export_only"))
+              entry["vk_device"] = leg.get("vk_device", "")
+              entry["headless"] = "1" if leg.get("headless") else ""
+              chosen.append(entry)
+
+          matrix = {"include": chosen}
+          print("matrix=" + json.dumps(matrix))
+          print("any=" + ("true" if chosen else "false"))
+
+          summary = ["## Plan", "",
+                     f"event `{event}`, ref `{ref}`, scope `{scope}`, legs `{wanted}`, rerun `{rerun}`", ""]
+          for leg in chosen:
+              rows = leg["only"] or ("screenshots only" if scope == "screenshots" else "the whole gate")
+              summary.append(f"- **{leg['id']}** — {rows}")
+          for name, why in skipped:
+              summary.append(f"- ~~{name}~~ — {why}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(summary) + "\n")
+          PY
+          echo "planned:"; cat "$GITHUB_OUTPUT"
+
   gate:
     name: gate (${{ matrix.id }})
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        # ── RERUN LISTS ─────────────────────────────────────────────────────
-        # `failed:` is what a push to main, or a manual run with rerun=failed,
-        # executes (a `v*` tag always runs everything). From the 2026-09-16 run
-        # (commit 8a646c69), these rows PASSED and are left out of reruns:
-        #
-        #   both:    G0.2 lockfile · G0.3 toolchain · G0.4 release-clean ·
-        #            G0.6 LICENSE · G0.7 secrets scan · G1.2 platform build ·
-        #            G1.7 CPU renderer · G1.8 animation stress ·
-        #            G1.9 Vieww Standard · G1.13 screenshots · G2.1 Studio walkthrough
-        #   macOS:   G3.1 installer (.dmg) + G8.1/G8.2 checksums
-        #
-        # G2.7-G2.11 (Studio's export route: scaffold, compile for Android/iOS/
-        # Windows, build a real .apk/.app/.exe) are new and have never run, so
-        # every list carries them until they pass.
-        #
-        # and these FAILED, so they are what reruns execute. G1.3 re-runs the
-        # whole certification (its stages are not separable from the outside);
-        # G0.12 is computed when runs are merged and needs no row here.
-        # Once a row passes, delete it from its list; empty the list (or pick
-        # rerun=all) for the final certification run.
-        include:
-          - id: windows-cpu
-            os: windows
-            runner: windows-latest
-            mode: cpu
-            failed: G0.5,G0.8,G1.1,G1.3,G3.1,G2.7,G2.8,G2.9,G2.10,G2.11
-          - id: macos-cpu
-            os: macos
-            runner: macos-latest
-            mode: cpu
-            failed: G0.5,G0.8,G1.1,G1.3,G2.7,G2.8,G2.9,G2.10,G2.11
-          # The macOS runner exposes Apple's paravirtualized GPU, which MoltenVK
-          # drives: the narrow GPU pass there is the only test of the Vulkan
-          # parity suite and census through MoltenVK (blocker B1's portability
-          # path) that this project has. A virtual device, not a user's GPU, so
-          # its timings mean nothing; its pixels do.
-          - id: macos-gpu
-            os: macos
-            runner: macos-latest
-            mode: gpu
-            failed: ""   # new job: nothing has passed yet, so it always runs in full
-          # Linux's own gate runs on your laptop. This job is only the export
-          # route, because the hosted Ubuntu image already has the Android SDK,
-          # NDK and JDK a laptop may not: a Linux .apk and a MinGW-cross .exe.
-          - id: linux-export
-            os: linux
-            runner: ubuntu-latest
-            mode: cpu
-            failed: G2.7,G2.8,G2.9,G2.10,G2.11
-            export-only: true
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     # Hosted jobs are cut off at 6 hours.
     timeout-minutes: 350
@@ -119,37 +310,44 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
-      # No display a test can own, and no GPU: see the header.
-      VIEWW_CERT_NO_DESKTOP: "1"
+      # A hosted runner has no display and no GPU; a self-hosted one has both,
+      # and `plan` says which this is. Empty rather than "0" so
+      # `${VIEWW_CERT_NO_DESKTOP:-0}` reads it as unset.
+      VIEWW_CERT_NO_DESKTOP: ${{ matrix.headless }}
+      # Which adapter the GPU pass uses, when the leg names one.
+      VIEWW_VK_DEVICE: ${{ matrix.vk_device }}
       # Throwaway machines: let the export suite add the Android/iOS/Windows
       # rustup targets (for this repo's toolchain and the scaffold's `stable`).
-      VIEWW_EXPORT_INSTALL_TARGETS: "1"
+      # Never on a self-hosted machine, where the toolchains are the owner's.
+      VIEWW_EXPORT_INSTALL_TARGETS: ${{ matrix.hosted && '1' || '' }}
       SCOPE: ${{ github.event_name == 'push' && 'gate' || inputs.scope }}
-      PACKAGE: ${{ matrix.mode == 'cpu' && !matrix.export-only && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
-      # Tag: everything (except the export-only job, which only ever does its
-      # rows). Push to main: the failed lists. Manual: the rerun choice.
-      ONLY: ${{ (matrix.export-only && matrix.failed) || (!startsWith(github.ref, 'refs/tags/') && (github.event_name == 'push' || inputs.rerun == 'failed') && matrix.failed) || '' }}
+      PACKAGE: ${{ matrix.mode == 'cpu' && !matrix.export_only && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
+      # Decided in `plan` — empty means the whole gate.
+      ONLY: ${{ matrix.only }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - name: Make disk space
+        if: matrix.hosted
         run: bash ci/tools/ci-runner-prep.sh
 
       - name: Rust toolchain (from rust-toolchain.toml)
+        if: matrix.hosted
         run: |
           rustup toolchain install   # reads rust-toolchain.toml (channel + components)
           rustc --version
           cargo --version
 
       - name: cargo-deny
+        if: matrix.hosted && env.SCOPE != 'screenshots'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
 
       - name: WiX (Windows installer)
-        if: matrix.os == 'windows' && env.PACKAGE == 'true'
+        if: matrix.os == 'windows' && env.PACKAGE == 'true' && env.SCOPE != 'screenshots'
         # v5: the last major without a EULA acceptance step; package.sh needs
         # only `wix build` and the <Files> element (v5+).
         run: |
@@ -160,30 +358,30 @@ jobs:
       # The Android SDK and NDK come with every hosted image (ci-runner-prep.sh
       # keeps them); these add what the images lack or version loosely.
       - name: JDK 17 (Android Gradle Plugin 8)
-        if: matrix.mode == 'cpu'
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Gradle 8.9 (a scaffolded project has no wrapper JAR)
-        if: matrix.mode == 'cpu'
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
       - name: cargo-ndk
-        if: matrix.mode == 'cpu'
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-ndk
 
       - name: MinGW-w64 (Windows .exe cross-build from Linux)
-        if: matrix.mode == 'cpu' && matrix.os == 'linux'
+        if: matrix.mode == 'cpu' && matrix.os == 'linux' && matrix.hosted && env.SCOPE != 'screenshots'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64
 
       - name: Android environment
-        if: matrix.mode == 'cpu'
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         run: |
           # The newest NDK the image has; cargo-ndk and Studio both read
           # ANDROID_NDK_HOME, which some images point at an older one.
@@ -193,7 +391,7 @@ jobs:
           echo "NDK: $ndk"; echo "SDK: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
       - name: Vulkan loader + MoltenVK (macOS; stages skip if no device)
-        if: matrix.os == 'macos'
+        if: matrix.os == 'macos' && matrix.hosted && env.SCOPE != 'screenshots'
         run: brew install molten-vk vulkan-loader vulkan-tools || true
 
       - name: Release gate
@@ -231,12 +429,12 @@ jobs:
       # have to download. Skipped on the GPU jobs (the CPU job on the same OS
       # draws the same pictures) and on the export-only job.
       - name: Screenshots
-        if: always() && env.SCOPE == 'gate' && matrix.mode == 'cpu' && !matrix.export-only
+        if: always() && (env.SCOPE == 'gate' || env.SCOPE == 'screenshots') && matrix.mode == 'cpu' && !matrix.export_only
         continue-on-error: true
         run: bash ci/tools/screenshots.sh "target/screenshots/${{ matrix.id }}"
 
       - name: Upload screenshots
-        if: always() && env.SCOPE == 'gate' && matrix.mode == 'cpu' && !matrix.export-only
+        if: always() && (env.SCOPE == 'gate' || env.SCOPE == 'screenshots') && matrix.mode == 'cpu' && !matrix.export_only
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ matrix.id }}
