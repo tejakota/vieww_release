@@ -549,7 +549,7 @@ pub fn resident_bytes() -> Option<u64> {
             .trim()
             .parse()
             .ok()?;
-        return Some(kilobytes * 1024);
+        Some(kilobytes * 1024)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     None

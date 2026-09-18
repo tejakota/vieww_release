@@ -128,13 +128,27 @@ impl Reloader {
     ///
     /// Fails only if the *first* load fails: after that a broken build is
     /// reported through [`Reloaded::Failed`] and the running one is kept.
+    ///
+    /// # On Windows the first load is a copy too
+    ///
+    /// Windows locks a loaded DLL against deletion, and cargo's next build of
+    /// the guest starts by removing the old one — so opening the path cargo
+    /// writes made every rebuild after the first fail with `failed to remove
+    /// file ... reload_guest.dll: Access is denied`, and no reload could ever
+    /// happen. Loading a copy beside it leaves cargo's file free, exactly as
+    /// every later reload already does.
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, LoadError> {
         let path = path.into();
-        let guest = Guest::load(&path)?;
-        Ok(Self {
-            watch: Watch::new(path),
-            guest,
-        })
+        let watch = Watch::new(path);
+        let guest = if cfg!(windows) {
+            let staged = watch
+                .stage()
+                .map_err(|error| LoadError::Stage(watch.staged_path(), error))?;
+            Guest::load(&staged)?
+        } else {
+            Guest::load(watch.path())?
+        };
+        Ok(Self { watch, guest })
     }
 
     /// Load `path`, but copy it into `dir` first — **including the first load**.

@@ -223,6 +223,27 @@ jobs:
             cat "$run/FAILURES.md"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ── Ten pictures a person looks at (5 features + 5 studio) ───────────
+      # Not a gate row and it fails nothing: `docs/RELEASE-CHECK.md`'s last
+      # step is a person skimming the screenshots on each OS for missing
+      # glyphs, clipped panels and wrong colours, and that person needs the
+      # pictures attached to the run rather than buried in a gate folder they
+      # have to download. Skipped on the GPU jobs (the CPU job on the same OS
+      # draws the same pictures) and on the export-only job.
+      - name: Screenshots
+        if: always() && env.SCOPE == 'gate' && matrix.mode == 'cpu' && !matrix.export-only
+        continue-on-error: true
+        run: bash ci/tools/screenshots.sh "target/screenshots/${{ matrix.id }}"
+
+      - name: Upload screenshots
+        if: always() && env.SCOPE == 'gate' && matrix.mode == 'cpu' && !matrix.export-only
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.id }}
+          path: target/screenshots/${{ matrix.id }}
+          retention-days: 30
+          if-no-files-found: warn
+
       - name: Checks only
         if: env.SCOPE == 'checks' && matrix.mode == 'cpu'
         run: bash ci/vieww checks

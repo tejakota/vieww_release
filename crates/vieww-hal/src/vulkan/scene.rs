@@ -1523,8 +1523,21 @@ fn create_render_pass(
     load: vk::AttachmentLoadOp,
 ) -> Result<vk::RenderPass, VulkanError> {
     // Every target rests in SHADER_READ_ONLY_OPTIMAL between passes, so a
-    // later pass can read it with no barrier of its own. A clearing pass may
-    // discard the old contents (UNDEFINED); a loading pass may not.
+    // later pass finds it in the layout it needs. A clearing pass may discard
+    // the old contents (UNDEFINED); a loading pass may not.
+    //
+    // **The layout is not the synchronisation, which is what the two
+    // dependencies below are for.** A layer is drawn into its own target in
+    // one pass and sampled from the next, and nothing in a render pass orders
+    // those against each other on its own: a driver is free to start the
+    // second pass's fragment work before the first pass's colour writes have
+    // landed. A software rasteriser runs the passes one after another and
+    // forgives the omission — every one of these suites passed on llvmpipe —
+    // while real hardware overlaps them. On a GeForce 920MX that showed up as
+    // four failures in `vulkan_compositor.rs`, all of them a pass reading what
+    // an earlier pass had written: `shaped-clips` sampled a mask that was not
+    // there yet and left 2413 pixels unclipped, and backdrop blur, shadow
+    // spread and nested layers came back a few steps off.
     let initial = if load == vk::AttachmentLoadOp::CLEAR {
         vk::ImageLayout::UNDEFINED
     } else {
@@ -1546,11 +1559,37 @@ fn create_render_pass(
     let subpasses = [vk::SubpassDescription::default()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
         .color_attachments(&color_ref)];
+    let dependencies = [
+        // Reads of this target by an earlier pass finish before this one
+        // writes it (write-after-read).
+        vk::SubpassDependency {
+            src_subpass: vk::SUBPASS_EXTERNAL,
+            dst_subpass: 0,
+            src_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            src_access_mask: vk::AccessFlags::SHADER_READ,
+            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                | vk::AccessFlags::COLOR_ATTACHMENT_READ,
+            dependency_flags: vk::DependencyFlags::BY_REGION,
+        },
+        // This pass's writes are complete and visible before any later pass
+        // samples the target (read-after-write). The one that was missing.
+        vk::SubpassDependency {
+            src_subpass: 0,
+            dst_subpass: vk::SUBPASS_EXTERNAL,
+            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            dst_access_mask: vk::AccessFlags::SHADER_READ,
+            dependency_flags: vk::DependencyFlags::BY_REGION,
+        },
+    ];
     Ok(unsafe {
         device.create_render_pass(
             &vk::RenderPassCreateInfo::default()
                 .attachments(&attachments)
-                .subpasses(&subpasses),
+                .subpasses(&subpasses)
+                .dependencies(&dependencies),
             None,
         )
     }?)

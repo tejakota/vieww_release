@@ -23,10 +23,22 @@ TAIL = 60          # lines of log per failure
 WIDTH = 400        # characters per line, so one minified blob cannot flood a summary
 
 
+# Cargo colours its output on CI (`CARGO_TERM_COLOR=always`), which puts an
+# escape code between the start of the line and `error`, so none of the
+# `^error` patterns below matched and the clippy diagnostics never reached the
+# summary — the first macOS and Windows reports said "FAILED: clippy" and
+# nothing about why. Strip colour before matching anything.
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\([A-Z]")
+
+
+def read_lines(path: pathlib.Path) -> list[str]:
+    return ANSI.sub("", path.read_text(encoding="utf-8", errors="replace")).splitlines()
+
+
 def tail(path: pathlib.Path, n: int = TAIL) -> str:
     if not path.is_file():
         return f"(no log at {path.name})"
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = read_lines(path)
     # Cargo's progress lines say nothing about why something failed.
     lines = [l for l in lines if not re.match(r"^\s+(Compiling|Checking|Documenting|Downloaded|Downloading|Fresh|Blocking) ", l)]
     cut = lines[-n:]
@@ -59,7 +71,7 @@ def excerpt(path: pathlib.Path, limit: int = 90) -> str:
     """
     if not path.is_file():
         return ""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = read_lines(path)
     keep: list[str] = []
     skip_until = -1
     for i, line in enumerate(lines):
@@ -105,7 +117,7 @@ def report(run: pathlib.Path) -> tuple[str, int]:
         if row_id == "G1.1":
             log = run / "logs" / "G1.1.txt"
             if log.is_file():
-                text = log.read_text(encoding="utf-8", errors="replace").splitlines()
+                text = read_lines(log)
                 failed = [l.strip()[len("FAILED:"):].strip() for l in text if l.strip().startswith("FAILED:")]
                 if failed:
                     out.append("Failed stages in `checks`:\n\n" + "\n".join(f"- {l}" for l in failed[:20]) + "\n")
