@@ -63,12 +63,6 @@ bash ci/certify/release-check.sh --quick "$studio_all" ||
 
 # Five, spread across the run rather than the first five, which are all the
 # same screen at start-up.
-<<<<<<< ours
-<<<<<<< ours
-mapfile -t shots < <(find "$studio_all" -name '*.png' | sort)
-=======
-=======
->>>>>>> theirs
 # A `while read` loop rather than `mapfile`: macOS ships bash 3.2, which does
 # not have `mapfile`, and the macOS job produced feature shots and no studio
 # ones at all the first time this ran.
@@ -76,10 +70,6 @@ shots=()
 while IFS= read -r shot; do
 	shots+=("$shot")
 done < <(find "$studio_all" -name '*.png' | sort)
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
 count="${#shots[@]}"
 if ((count > 0)); then
 	step=$((count / 5))
