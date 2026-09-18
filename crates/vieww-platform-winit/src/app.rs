@@ -5,6 +5,7 @@
 //! [`FrameLog`] are all tested without a window — and what is left here is the
 //! wiring that genuinely needs one.
 
+use std::mem::ManuallyDrop;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -938,7 +939,9 @@ impl App {
 /// backgrounded app crashes on the way back.
 struct Gpu {
     window: Arc<Window>,
-    renderer: NativeRenderer,
+    /// `ManuallyDrop` only so that `VIEWW_KEEP_VULKAN` can skip it — see
+    /// [`Gpu`]'s `Drop`. Dropped exactly once otherwise.
+    renderer: ManuallyDrop<NativeRenderer>,
     surface: NativeSurface,
     /// The next present must repaint everything rather than trust damage.
     ///
@@ -961,6 +964,22 @@ struct Gpu {
 impl Drop for Gpu {
     fn drop(&mut self) {
         self.surface.release(&self.renderer);
+        // **`VIEWW_KEEP_VULKAN=1` keeps the device and instance alive.** A
+        // diagnostic, not a setting: every window opens a `VkInstance` and a
+        // `VkDevice` of its own (`VulkanDevice::for_window`), so closing one
+        // window calls `vkDestroyInstance` while other windows' instances are
+        // still live — and NVIDIA's driver then jumps through a null pointer
+        // inside the *next* window's `vkDestroySwapchainKHR`. With this set
+        // nothing is ever destroyed: if the segfault goes away, the driver's
+        // per-process state is what the earlier teardown broke, and the fix is
+        // one shared instance and device for every window rather than one
+        // each. It leaks a device per window, so it is for one run of the
+        // desktop suite and nothing else.
+        if std::env::var_os("VIEWW_KEEP_VULKAN").is_none() {
+            // SAFETY: the only place the renderer is dropped, and `Gpu` is
+            // gone after this — nothing can reach the field again.
+            unsafe { ManuallyDrop::drop(&mut self.renderer) };
+        }
     }
 }
 
@@ -1953,7 +1972,7 @@ impl<F: FnOnce(&mut FrameDriver)> Runner<F> {
         state.follow_display(&self.shared, &window);
         state.gpu = Some(Gpu {
             window,
-            renderer,
+            renderer: ManuallyDrop::new(renderer),
             surface,
             needs_full_repaint: true,
         });
@@ -2006,7 +2025,7 @@ impl<F: FnOnce(&mut FrameDriver)> Runner<F> {
             state.follow_display(shared, &window);
             state.gpu = Some(Gpu {
                 window,
-                renderer,
+                renderer: ManuallyDrop::new(renderer),
                 surface,
                 needs_full_repaint: true,
             });
