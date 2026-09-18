@@ -316,6 +316,13 @@ jobs:
       VIEWW_CERT_NO_DESKTOP: ${{ matrix.headless }}
       # Which adapter the GPU pass uses, when the leg names one.
       VIEWW_VK_DEVICE: ${{ matrix.vk_device }}
+      # **Frame budgets are measured here and judged elsewhere.** A hosted
+      # runner is a shared virtual machine, and the checklist already says to
+      # treat its timings as indicative — so the animation-stress budget is
+      # recorded rather than enforced on these machines, and enforced on the
+      # self-hosted ones, which are real hardware. A stuttering animation still
+      # fails everywhere; that is a picture, not a clock.
+      VIEWW_TIMINGS_ADVISORY: ${{ matrix.hosted && '1' || '' }}
       # Throwaway machines: let the export suite add the Android/iOS/Windows
       # rustup targets (for this repo's toolchain and the scaffold's `stable`).
       # Never on a self-hosted machine, where the toolchains are the owner's.

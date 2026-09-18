@@ -136,6 +136,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let mut failures = Vec::new();
+    // How many of the failures below are about the clock rather than about the
+    // picture — see the advisory note at the end.
+    let mut over_budget_failures = 0usize;
     if moving < FRAMES - 1 {
         failures.push(format!(
             "only {moving} of {} frame pairs changed; the animation is \
@@ -146,12 +149,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // p95, not worst: a single scheduling hiccup on a shared runner is not a
     // regression, five percent of frames is.
     if p95 > BUDGET_MS {
+        over_budget_failures += 1;
         failures.push(format!(
             "p95 frame time {p95:.2} ms exceeds the {:.1} ms budget",
             BUDGET_MS
         ));
     }
     if over_budget > allowed_over_budget {
+        over_budget_failures += 1;
         failures.push(format!(
             "{over_budget} of {FRAMES} frames over budget — the 200-tile \
              animation is not sustainable at 60 Hz"
@@ -161,13 +166,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("wrote {}", out.display());
     if failures.is_empty() {
         println!("ALL ANIMATION-STRESS CHECKS PASSED");
-    } else {
-        for failure in &failures {
-            eprintln!("FAIL: {failure}");
-        }
-        return Err(format!("{} animation-stress check(s) failed", failures.len()).into());
+        return Ok(());
     }
-    Ok(())
+
+    for failure in &failures {
+        eprintln!("FAIL: {failure}");
+    }
+
+    // **`VIEWW_TIMINGS_ADVISORY=1`: measure, report, do not fail.**
+    //
+    // The budget is a claim about release-class hardware (blocker B7), and a
+    // hosted CI runner is not that: it is a shared virtual machine whose
+    // neighbours decide what a millisecond costs. `BETA-RELEASE-CHECKLIST.md`
+    // already says to treat those timings as indicative, and the numbers are
+    // written to `metrics.txt` either way — so on those machines this records
+    // what it measured rather than failing a release for the runner's weather.
+    //
+    // **Only the budget checks are advisory.** A stuttering or dead animation
+    // is a correctness failure and stays one, whatever the machine: a frame
+    // that did not change is not slow, it is wrong.
+    let budget_only = failures.len() == over_budget_failures;
+    if std::env::var_os("VIEWW_TIMINGS_ADVISORY").is_some() && budget_only {
+        println!(
+            "ADVISORY: {} timing check(s) failed on a machine whose timings are              not evidence (VIEWW_TIMINGS_ADVISORY=1). The measurements are in              metrics.txt; certify the budget on release-class hardware.",
+            failures.len()
+        );
+        return Ok(());
+    }
+
+    Err(format!("{} animation-stress check(s) failed", failures.len()).into())
 }
 
 // ─────────────────────────────────────────────────────────────────────────
