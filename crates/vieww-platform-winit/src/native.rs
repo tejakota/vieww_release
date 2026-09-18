@@ -56,7 +56,9 @@
 //! `tests/vulkan_smoke.rs` separately proves the headless half (device,
 //! pipeline, render-to-texture-then-readback) against `lavapipe`.
 
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 
 use vieww_foundation::Color;
 use vieww_hal::vulkan::{VulkanDevice, VulkanError, VulkanSwapchain};
@@ -132,11 +134,57 @@ impl NativeSurface {
     }
 }
 
+thread_local! {
+    /// The one `VkInstance`/`VkDevice` this process opens, kept alive for as
+    /// long as any window holds it.
+    static SHARED_DEVICE: RefCell<Option<Rc<VulkanDevice>>> = const { RefCell::new(None) };
+}
+
+/// The shared device, and a swapchain for this window on it.
+///
+/// **One driver per process, not one per window.** Opening a `VkInstance` and
+/// a `VkDevice` per window meant that closing any window destroyed a driver
+/// out from under the windows that were still open, and the next window's
+/// `vkDestroySwapchainKHR` crashed inside it — a null jump on NVIDIA, a double
+/// free on Mesa's Intel driver, both reproduced by the desktop suite the
+/// moment it closed a second window. See
+/// [`VulkanDevice::swapchain_for_window`] for the measurements.
+///
+/// The event loop is single-threaded, so the cache is thread-local rather than
+/// a lock, and it is only ever read on the thread that opens windows.
+///
+/// If the existing adapter cannot present to the new window — a second GPU
+/// driving a second monitor is the case — this opens a device for that window
+/// alone rather than failing, which is the old behaviour for the one situation
+/// that needed it.
+fn shared_device_for(
+    window: &(impl raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle),
+    width: u32,
+    height: u32,
+) -> Result<(Rc<VulkanDevice>, VulkanSwapchain), NativeError> {
+    let existing = SHARED_DEVICE.with(|cell| cell.borrow().clone());
+    if let Some(device) = existing {
+        match device.swapchain_for_window(window, width, height) {
+            Ok(swapchain) => return Ok((device, swapchain)),
+            // Not this adapter's window. Fall through to a device of its own.
+            Err(VulkanError::NoAdapter) => {}
+            Err(error) => return Err(error.into()),
+        }
+        let (device, swapchain) = VulkanDevice::for_window(window, width, height)?;
+        return Ok((Rc::new(device), swapchain));
+    }
+
+    let (device, swapchain) = VulkanDevice::for_window(window, width, height)?;
+    let device = Rc::new(device);
+    SHARED_DEVICE.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&device)));
+    Ok((device, swapchain))
+}
+
 /// Presents [`vieww_paint::Scene`]s rasterised by `vieww-paint`'s `native`
 /// backend, through `vieww-hal`'s Vulkan swapchain. See the module docs for
 /// what this does and does not cover yet.
 pub struct NativeRenderer {
-    device: VulkanDevice,
+    device: Rc<VulkanDevice>,
     cpu: CpuRenderer,
 }
 
@@ -199,7 +247,7 @@ impl NativeRenderer {
         height: u32,
         cpu: CpuRenderer,
     ) -> Result<(Self, NativeSurface), NativeError> {
-        let (device, swapchain) = VulkanDevice::for_window(window, width, height)?;
+        let (device, swapchain) = shared_device_for(window, width, height)?;
         Ok((Self { device, cpu }, NativeSurface { swapchain }))
     }
 

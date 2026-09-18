@@ -694,8 +694,17 @@ windows)
 	# trust decision — and because it is what the studio's own layout already
 	# supports: `install::target_dir` finds `lib\vieww` beside the executable.
 	if command -v powershell.exe >/dev/null 2>&1; then
+		# **PowerShell needs Windows paths, and `$tree`/`$out` are Git Bash
+		# ones.** `\` on a `/d/a/...` string produces `\d\a\...`, which
+		# PowerShell reads as a UNC-ish path that does not exist:
+		# "Compress-Archive : The path '\d\a\...\target\package' either does
+		# not exist or is not a valid file system path" — the whole Windows
+		# release, stopped after everything had been built and verified.
+		# `cygpath -w` is the conversion, and it ships with Git Bash.
+		tree_win="$(cygpath -w "$tree" 2>/dev/null || echo "$tree")"
+		out_win="$(cygpath -w "$out" 2>/dev/null || echo "$out")"
 		powershell.exe -NoProfile -Command \
-			"Compress-Archive -Path '$tree\\*' -DestinationPath '$out\\viewwstudio-windows-x86_64.zip' -Force"
+			"Compress-Archive -Path '$tree_win\\*' -DestinationPath '$out_win\\viewwstudio-windows-x86_64.zip' -Force"
 	elif command -v zip >/dev/null 2>&1; then
 		(cd "$out" && zip -qr "viewwstudio-windows-x86_64.zip" "viewwstudio-$version")
 	else

@@ -180,12 +180,24 @@ mod tests {
     /// shows up as a reviewable diff. If this test fails, either the
     /// generator changed (re-run saygen and commit the new fixture
     /// deliberately) or the fixture drifted (fix the fixture).
+    ///
+    /// **Line endings are normalised before comparing.** The generator emits
+    /// `\n`, and a Windows checkout can hand this `\r\n` — `.gitattributes`
+    /// asks for LF, but a clone made before it existed, or a `core.autocrlf`
+    /// left on, still delivers CRLF, and this test then failed on the Windows
+    /// runner with two identical-looking 8KB strings in the message. What is
+    /// under test is the generated *code*, not which bytes git chose to write
+    /// the fixture with.
     #[test]
     fn the_counter_fixture_is_current() {
         let source = include_str!("../tests/fixtures/counter.say");
         let expected = include_str!("../tests/fixtures/counter_gen.rs");
         let generated = crate::compile("counter.say", source).expect("the fixture compiles");
-        assert_eq!(generated.rust, expected, "the committed fixture is stale");
+        assert_eq!(
+            generated.rust.replace("\r\n", "\n"),
+            expected.replace("\r\n", "\n"),
+            "the committed fixture is stale"
+        );
     }
 
     /// Byte-identical output on every run is the codegen contract (spec
