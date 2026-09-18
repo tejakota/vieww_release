@@ -634,6 +634,7 @@ mod tests {
     fn build_and_run_starts_the_binary_the_build_produced() {
         let s = std::env::temp_dir().join("vieww-builds-run");
         std::fs::create_dir_all(&s).unwrap();
+<<<<<<< ours
         // What "a binary the build produced" is depends on the platform: a
         // shebang script is not runnable on Windows, where the extension is
         // what makes a file a program.
@@ -649,12 +650,56 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
+=======
+
+        // **What stands in for "the binary the build produced".**
+        //
+        // On Unix, a shell script with the executable bit — what it has always
+        // been. On Windows neither half of that works: `CreateProcess` cannot
+        // run a `.bat` at all (`std::process::Command` does not shell out for
+        // one), and there is no executable bit to set. So the stand-in there
+        // is a real program that every Windows has, prints something and exits
+        // 0. The claim under test is the *handoff* — that the path cargo
+        // reported is the one that gets run — and that is the same claim
+        // whichever program sits at the end of it.
+        let binary = if cfg!(windows) {
+            PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()))
+                .join("System32")
+                .join("whoami.exe")
+        } else {
+            let path = s.join("app");
+            std::fs::write(&path, "#!/bin/sh\necho the app is running\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            path
+        };
+
+        // **The artefact line goes through a file, not through the shell.**
+        // It carries a Windows path — `"executable":"C:\\Users\\..."` — and
+        // every attempt to get those backslashes through `sh -c` intact failed
+        // in a different way: `echo` expanded them (XSI), and escaping them
+        // first only moved the problem. Cargo writes this line to a pipe, not
+        // to a shell, so the fake one reads it from a file and the quoting
+        // question disappears.
+        let line = s.join("artifact.json");
+        std::fs::write(&line, artifact_json(&binary.to_string_lossy())).unwrap();
+>>>>>>> theirs
 
         let mut builds = Builds::new();
         builds.start_spec(
+            // Forward slashes: `sh` accepts them on Windows, and they need no
+            // escaping anywhere.
             fake_cargo(&format!(
+<<<<<<< ours
                 "{}; exit 0",
                 emit(&artifact_json(&binary.to_string_lossy()))
+=======
+                "cat '{}'; exit 0",
+                line.to_string_lossy().replace('\\', "/")
+>>>>>>> theirs
             )),
             Kind::BuildAndRun,
             || {},
@@ -674,8 +719,16 @@ mod tests {
             },
             "the reported state is the run's, not the build's"
         );
+        // The stand-in program prints its own thing on each platform — the
+        // script's line on Unix, the user's name on Windows — so what is
+        // asserted is that *something* of the run's reached the panel.
+        let ran = if cfg!(windows) {
+            builds.output.iter().any(|l| !l.trim().is_empty())
+        } else {
+            builds.output.iter().any(|l| l == "the app is running")
+        };
         assert!(
-            builds.output.iter().any(|l| l == "the app is running"),
+            ran,
             "the binary's own output belongs in the panel: {:?}",
             builds.output
         );

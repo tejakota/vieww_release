@@ -272,7 +272,24 @@ pub fn screen() -> impl Widget { Screen }
     );
 }
 
+///
+/// **Ignored on Windows, where the boundary does not exist yet.** The catch
+/// below needs the host and the guest to share one `libstd`, and
+/// `.cargo/config.toml` deliberately does not set `-C prefer-dynamic` for MSVC
+/// (see `ci/check/platform-check.sh`'s Windows note: that toolchain's dynamic
+/// `std` is not something a checkout can rely on, and the answer there is an
+/// out-of-process preview, which is not written). So on Windows the guest
+/// panic really is a foreign exception, `catch_unwind` cannot catch it, and
+/// the process fails fast — the run showed it as
+/// `STATUS_STACK_BUFFER_OVERRUN`, a crashed test binary rather than a failed
+/// assertion. Ignoring it records that gap where somebody will read it;
+/// `packaging/package.sh` gives the *shipped* studio a dynamic `std`, so this
+/// is about a checkout, not about the installed product.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "needs one shared libstd; MSVC has no dynamic std in a checkout"
+)]
 fn a_panicking_build_on_a_later_rebuild_is_caught_by_the_host_not_aborted() {
     // **The boundary the panic section in `loaded.rs` describes as the third
     // catch.** `screen()` panicking and the *first* `build()` panicking are
