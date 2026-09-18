@@ -176,7 +176,7 @@ echo "desktop-suite: running (up to ${timeout_seconds}s; a window will open)"
 # Backgrounded with its output to a file, rather than piped: a pipeline's exit
 # status belongs to the reader, and `set -o pipefail` on a `head` that stops
 # early would kill this script instead of the app.
-"${runner[@]}" "$binary" >"$log" 2>&1 &
+${runner[@]+"${runner[@]}"} "$binary" >"$log" 2>&1 &
 app=$!
 
 waited=0

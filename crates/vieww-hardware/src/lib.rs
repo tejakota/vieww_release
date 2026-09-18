@@ -508,6 +508,19 @@ fn probe_display() -> Availability {
 /// reports a screen that is not there. That is a silent *anti*-skip: the test
 /// runs and fails with a window-creation error instead of skipping with a
 /// reason.
+///
+/// Only the Linux probe calls it outside tests, so on the other desktop
+/// targets it is dead in the library build — and `-D warnings` made that the
+/// clippy failure on the macOS and Windows runners.
+#[cfg_attr(
+    any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "android",
+        target_os = "ios"
+    ),
+    allow(dead_code)
+)]
 fn display_from_env(wayland: Option<&str>, x11: Option<&str>) -> Availability {
     let wayland = wayland.filter(|value| !value.is_empty());
     let x11 = x11.filter(|value| !value.is_empty());

@@ -166,6 +166,10 @@ rm -rf "$out"
 mkdir -p "$out"
 
 echo "==> building viewwstudio $version ($profile, $host)"
+# `${cargo_profile[@]+...}` rather than `"${cargo_profile[@]}"` throughout: with
+# `--debug` the array is empty, and macOS's bash 3.2 treats an empty array as
+# unset under `set -u` — "cargo_profile[@]: unbound variable", which is how the
+# macOS packaging smoke test died before building anything.
 # `VIEWWSTUDIO_BUILD` is optional and read by `about.rs`. A build with none says
 # "development build" rather than leaving a blank line in a bug report.
 #
@@ -175,11 +179,29 @@ echo "==> building viewwstudio $version ($profile, $host)"
 # that happen to be newest — see `copy_rlibs`. Diagnostics still render to the
 # terminal; only the machine-readable stream is captured.
 build_log="$out/build.json"
-cargo build -p viewwstudio "${cargo_profile[@]}" \
+# **Windows: `-C prefer-dynamic` for the shipped studio, set here.**
+#
+# Every preview the studio compiles is `-C prefer-dynamic` on every host
+# (`apps/viewwstudio/src/compile.rs`), so it imports `std-<hash>.dll`. The
+# studio has to import the same DLL or a guest panic is a foreign exception to
+# its `catch_unwind` — `copy_windows_std` below checks exactly that, and it
+# failed on the first Windows run to get this far, because `.cargo/config.toml`
+# sets the flag for Linux and macOS only.
+#
+# Scoped to packaging rather than added to that file's Windows section: on
+# Windows nothing but cargo puts the sysroot on `PATH`, and the gate runs
+# binaries directly (`export-suite.sh` runs `target/release/examples/export_check`),
+# which would stop starting. The bundle carries the DLL beside the exe, so only
+# the bundle needs the flag. No config block exists for Windows, so setting
+# `RUSTFLAGS` replaces nothing.
+if [ "$host" = "windows" ]; then
+	export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C prefer-dynamic"
+fi
+cargo build -p viewwstudio ${cargo_profile[@]+"${cargo_profile[@]}"} \
 	--message-format=json-render-diagnostics >"$build_log"
 
 echo "==> drawing icons"
-cargo run -p viewwstudio --example icon "${cargo_profile[@]}" -- "$out/icons" >/dev/null
+cargo run -p viewwstudio --example icon ${cargo_profile[@]+"${cargo_profile[@]}"} -- "$out/icons" >/dev/null
 
 target="$root/target/$profile"
 binary="$target/viewwstudio"
