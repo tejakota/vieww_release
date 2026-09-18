@@ -1038,7 +1038,16 @@ mod tests {
             .tree
             .files()
             .into_iter()
-            .map(|p| p.strip_prefix(&root).unwrap().display().to_string())
+            // `/` on every platform: `Path::display` writes `\` on Windows,
+            // and what is under test is which files the scan found, not which
+            // separator the operating system spells them with.
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .display()
+                    .to_string()
+                    .replace('\\', "/")
+            })
             .collect();
         assert!(
             files.iter().any(|f| f == "src/screens/home.rs"),

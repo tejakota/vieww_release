@@ -508,7 +508,9 @@ mod tests {
     /// emits it is the honest double. The format itself is pinned separately by
     /// `cargo.rs`'s tests against records copied from a real run.
     fn fake_cargo(script: &str) -> Spec {
-        Spec::new("Build", "/bin/sh", std::env::temp_dir())
+        // `sh` by name on Windows: see `task.rs`'s `sh` for why.
+        let program = if cfg!(windows) { "sh" } else { "/bin/sh" };
+        Spec::new("Build", program, std::env::temp_dir())
             .arg("-c")
             .arg(script)
     }
@@ -609,8 +611,16 @@ mod tests {
     fn build_and_run_starts_the_binary_the_build_produced() {
         let s = std::env::temp_dir().join("vieww-builds-run");
         std::fs::create_dir_all(&s).unwrap();
-        let binary = s.join("app");
-        std::fs::write(&binary, "#!/bin/sh\necho the app is running\n").unwrap();
+        // What "a binary the build produced" is depends on the platform: a
+        // shebang script is not runnable on Windows, where the extension is
+        // what makes a file a program.
+        let binary = s.join(if cfg!(windows) { "app.bat" } else { "app" });
+        let script = if cfg!(windows) {
+            "@echo the app is running\r\n"
+        } else {
+            "#!/bin/sh\necho the app is running\n"
+        };
+        std::fs::write(&binary, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

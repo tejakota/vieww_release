@@ -628,8 +628,17 @@ mod tests {
     /// Every test runs a real child process. A mocked one would test the mock:
     /// the properties here — pipe draining, kill, exit codes, ordering — are
     /// properties of the operating system's process handling, not of this file.
+    ///
+    /// **`sh` by name on Windows, `/bin/sh` by path elsewhere.** There is no
+    /// `/bin/sh` on Windows, and hard-coding it made all twenty of these tests
+    /// fail on the runner with `NotStarted("/bin/sh: The system cannot find
+    /// the path specified")` — which says nothing about pipes, kills or exit
+    /// codes, the things they exist to check. Git for Windows puts a POSIX
+    /// `sh` on `PATH` (the studio's own `setup::shell` is a different
+    /// question: that one runs a *user's* command line, so it uses `cmd`).
     fn sh(script: &str) -> Spec {
-        Spec::new("test", "/bin/sh", std::env::temp_dir())
+        let program = if cfg!(windows) { "sh" } else { "/bin/sh" };
+        Spec::new("test", program, std::env::temp_dir())
             .arg("-c")
             .arg(script)
     }
