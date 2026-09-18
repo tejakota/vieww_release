@@ -141,7 +141,14 @@ fn a_scaffolded_say_project_builds_and_contains_its_screen() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let binary = target_dir.join("debug").join("say_build_check");
+    // `.exe` on Windows: cargo names the binary after the host, and reading
+    // the extensionless path there failed with "The system cannot find the
+    // file specified" against a build that had just succeeded.
+    let binary = target_dir.join("debug").join(if cfg!(windows) {
+        "say_build_check.exe"
+    } else {
+        "say_build_check"
+    });
     let bytes = std::fs::read(&binary).expect("the built binary should exist");
 
     assert!(

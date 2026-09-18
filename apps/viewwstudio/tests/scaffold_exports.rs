@@ -210,8 +210,17 @@ fn a_project_with_no_wrapper_is_built_with_gradle_and_one_with_a_wrapper_is_not(
     .expect("a plan");
     assert_eq!(plan.steps[1].spec.program, "gradle");
 
-    // Now somebody has run `gradle wrapper` once.
-    std::fs::write(project.root.join("android/gradlew"), "#!/bin/sh\n").expect("write");
+    // Now somebody has run `gradle wrapper` once. The wrapper `gradle` writes
+    // is `gradlew` plus `gradlew.bat`, and `export::gradle_command` looks for
+    // the one this host would run — so the test writes that one, rather than
+    // the Unix name on every platform, which left Windows still planning
+    // `gradle`.
+    let wrapper = if cfg!(windows) {
+        "gradlew.bat"
+    } else {
+        "gradlew"
+    };
+    std::fs::write(project.root.join("android").join(wrapper), "#!/bin/sh\n").expect("write");
     let plan = export::plan(
         &ready(Host::Linux, &project.bin()),
         &project.root,
