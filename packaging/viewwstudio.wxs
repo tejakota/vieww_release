@@ -54,15 +54,26 @@
 		<MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
 		<StandardDirectory Id="ProgramFiles64Folder">
-			<Directory Id="INSTALLFOLDER" Name="vieww Studio">
-				<!--
-					Everything the packaging script staged, verbatim. The
-					subdirectory structure of the payload is preserved, which is
-					what puts `lib\vieww` where the studio looks for it.
-				-->
-				<Files Include="$(Payload)\**" />
-			</Directory>
+			<Directory Id="INSTALLFOLDER" Name="vieww Studio" />
 		</StandardDirectory>
+
+		<!--
+			Everything the packaging script staged, verbatim. The subdirectory
+			structure of the payload is preserved, which is what puts
+			`lib\vieww` where the studio looks for it.
+
+			**The `ComponentGroup` wrapper is what makes the name below real.**
+			`<Files>` on its own generates components with names the linker
+			chooses; the `Feature` at the bottom references a group called
+			`Files`, and with nothing declaring that name the link failed with
+			"WIX0094: The identifier 'WixComponentGroup:Files' could not be
+			found" after every file had been staged and the zip already built.
+			A `ComponentGroup` with an `Id` and a `Directory` is where `<Files>`
+			is meant to live, and it is the group the feature refers to.
+		-->
+		<ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+			<Files Include="$(Payload)\**" />
+		</ComponentGroup>
 
 		<!-- The Start menu entry, and the only shortcut: a desktop icon nobody
 		     asked for is the thing people uninstall software over. -->
