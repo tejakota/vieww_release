@@ -515,6 +515,20 @@ mod tests {
             .arg(script)
     }
 
+    /// Shell for `printf '%s\n' '<line>'` — **not** `echo`.
+    ///
+    /// `echo` is where a Windows path went to die. A cargo artefact line
+    /// carries `"executable":"C:\\Users\\..."`, JSON-escaped as cargo
+    /// writes it, and Git for Windows' `sh` runs `echo` in the XSI sense: it
+    /// expands `\\` back to a single `\`, so what reached the parser was
+    /// `C:\Users\...`, which is not valid JSON. The line was dropped, no
+    /// artefact was seen, and `builds.binary` stayed `None` — twice, because
+    /// escaping the path correctly does not help when the shell then unescapes
+    /// it. `printf` does not touch its `%s` arguments.
+    fn emit(line: &str) -> String {
+        format!("printf '%s\\n' '{line}'")
+    }
+
     const ERROR_JSON: &str = r#"{"reason":"compiler-message","message":{"level":"error","message":"cannot find value `x` in this scope","code":{"code":"E0425"},"children":[],"spans":[{"file_name":"src/main.rs","line_start":7,"column_start":13,"is_primary":true}]}}"#;
     const WARN_JSON: &str = r#"{"reason":"compiler-message","message":{"level":"warning","message":"unused variable: `y`","code":{"code":"unused_variables"},"children":[],"spans":[{"file_name":"src/main.rs","line_start":3,"column_start":9,"is_primary":true}]}}"#;
 
@@ -546,7 +560,9 @@ mod tests {
         let mut builds = Builds::new();
         builds.start_spec(
             fake_cargo(&format!(
-                "echo '   Compiling app v0.1.0' 1>&2; echo '{ERROR_JSON}'; echo '{WARN_JSON}'; exit 101"
+                "echo '   Compiling app v0.1.0' 1>&2; {}; {}; exit 101",
+                emit(ERROR_JSON),
+                emit(WARN_JSON)
             )),
             Kind::Build,
             || {},
@@ -580,7 +596,7 @@ mod tests {
     fn a_successful_build_counts_its_warnings() {
         let mut builds = Builds::new();
         builds.start_spec(
-            fake_cargo(&format!("echo '{WARN_JSON}'; exit 0")),
+            fake_cargo(&format!("{}; exit 0", emit(WARN_JSON))),
             Kind::Build,
             || {},
         );
@@ -637,8 +653,8 @@ mod tests {
         let mut builds = Builds::new();
         builds.start_spec(
             fake_cargo(&format!(
-                "echo '{}'; exit 0",
-                artifact_json(&binary.to_string_lossy())
+                "{}; exit 0",
+                emit(&artifact_json(&binary.to_string_lossy()))
             )),
             Kind::BuildAndRun,
             || {},
@@ -671,7 +687,7 @@ mod tests {
     fn a_failed_build_never_runs_anything() {
         let mut builds = Builds::new();
         builds.start_spec(
-            fake_cargo(&format!("echo '{}'; exit 101", artifact_json("/bin/echo"))),
+            fake_cargo(&format!("{}; exit 101", emit(&artifact_json("/bin/echo")))),
             Kind::BuildAndRun,
             || {},
         );
@@ -723,7 +739,7 @@ mod tests {
     fn a_new_build_clears_the_last_ones_problems() {
         let mut builds = Builds::new();
         builds.start_spec(
-            fake_cargo(&format!("echo '{ERROR_JSON}'; exit 101")),
+            fake_cargo(&format!("{}; exit 101", emit(ERROR_JSON))),
             Kind::Build,
             || {},
         );
