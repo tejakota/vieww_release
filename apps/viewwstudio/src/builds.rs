@@ -634,23 +634,6 @@ mod tests {
     fn build_and_run_starts_the_binary_the_build_produced() {
         let s = std::env::temp_dir().join("vieww-builds-run");
         std::fs::create_dir_all(&s).unwrap();
-<<<<<<< ours
-        // What "a binary the build produced" is depends on the platform: a
-        // shebang script is not runnable on Windows, where the extension is
-        // what makes a file a program.
-        let binary = s.join(if cfg!(windows) { "app.bat" } else { "app" });
-        let script = if cfg!(windows) {
-            "@echo the app is running\r\n"
-        } else {
-            "#!/bin/sh\necho the app is running\n"
-        };
-        std::fs::write(&binary, script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-=======
 
         // **What stands in for "the binary the build produced".**
         //
@@ -686,20 +669,14 @@ mod tests {
         // question disappears.
         let line = s.join("artifact.json");
         std::fs::write(&line, artifact_json(&binary.to_string_lossy())).unwrap();
->>>>>>> theirs
 
         let mut builds = Builds::new();
         builds.start_spec(
             // Forward slashes: `sh` accepts them on Windows, and they need no
             // escaping anywhere.
             fake_cargo(&format!(
-<<<<<<< ours
-                "{}; exit 0",
-                emit(&artifact_json(&binary.to_string_lossy()))
-=======
                 "cat '{}'; exit 0",
                 line.to_string_lossy().replace('\\', "/")
->>>>>>> theirs
             )),
             Kind::BuildAndRun,
             || {},
