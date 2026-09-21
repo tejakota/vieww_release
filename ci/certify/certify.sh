@@ -95,7 +95,22 @@ run() {
 	echo "exit=$rc" >>"$file"
 	echo "seconds=$((SECONDS - start))" >>"$file"
 	if ((rc == 0)); then
-		record "$name" PASS
+		# A stage can exit 0 by passing cleanly, or by declining to fail a
+		# check that is not evidence on this machine — see
+		# `VIEWW_TIMINGS_ADVISORY` in `test-animation-stress`, set for
+		# `suites/animation-stress` by `ci/release/gate.sh`'s `--mode cpu`.
+		# Both are PASS for exit-code purposes; only one of them is the
+		# measurement G1.8 is actually about, so this says which, rather
+		# than reading like the same clean run either way (the same
+		# "skips are not passes" reasoning this script already applies to
+		# SKIPPED stages, applied to a stage that passed by not counting).
+		local advisory
+		advisory="$(grep -m1 '^ADVISORY:' "$file" || true)"
+		if [[ -n "$advisory" ]]; then
+			record "$name" "PASS(${advisory#ADVISORY: })"
+		else
+			record "$name" PASS
+		fi
 	else
 		record "$name" "FAIL(exit=$rc)"
 		FAILED=1

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use cosmic_text::{fontdb, FontSystem};
 use vieww_foundation::FontData;
@@ -104,6 +105,83 @@ pub const EMBEDDED_FAMILY: &str = "DejaVu Sans";
 /// The family name shared by the embedded monospace faces.
 pub const EMBEDDED_MONO_FAMILY: &str = "DejaVu Sans Mono";
 
+/// The assembled system-fallback database — embedded faces plus every font
+/// the OS reports — built once per process and cloned for every window after
+/// the first.
+///
+/// # Why this exists
+///
+/// `cosmic_text::FontSystem::new`'s own docs warn that building one "can take
+/// up to a second [in release], while debug builds can take up to ten times
+/// longer... it should only be called once, and the resulting `FontSystem`
+/// should be shared." [`FontStore::with_system_fallback`] used to ignore that
+/// advice on every window it opened: each call built a fresh
+/// `fontdb::Database` and ran `load_system_fonts()` — a synchronous walk of
+/// every font file on disk — from scratch, before that window's first frame.
+/// One window paid the scan once; an application that opens a second window
+/// or a dialog paid it again, in full, synchronously, on the frame that
+/// window is trying to present. Measured at 46 seconds on one slow disk (see
+/// `docs/release/BETA-RELEASE-CHECKLIST.md`, B12) — and a 3-window desktop
+/// suite paid that three times over.
+///
+/// # Why a clone is safe and cheap here
+///
+/// `fontdb::Database` derives `Clone`, and cloning it does not re-read any
+/// font: a face is stored as a `Source::File` path or a `Source::Binary`
+/// wrapping an `Arc<[u8]>`, so cloning the database clones small metadata and
+/// bumps a refcount, never the file system. What it does cost is an
+/// allocation proportional to the number of installed faces — real, but nine
+/// orders of magnitude cheaper than the scan it replaces.
+///
+/// # What this does not do
+///
+/// It does not notice a font installed after the first window opened in this
+/// process — the same staleness `VulkanDevice`'s per-process cache in
+/// `vieww-platform-winit::native` accepts for the same reason: a UI
+/// framework's window-open path is not the place to re-walk the filesystem on
+/// the chance something changed since the last window, and a process
+/// noticing a newly-installed font without restarting is not a guarantee any
+/// major toolkit makes either.
+fn scanned_system_db() -> fontdb::Database {
+    static SYSTEM_FONTS: OnceLock<fontdb::Database> = OnceLock::new();
+    SYSTEM_FONTS
+        .get_or_init(|| {
+            SYSTEM_FONT_SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut db = fontdb::Database::new();
+            // First, so a tie resolves to the deterministic face — see
+            // `with_system_fallback`'s own docs on why order is the point.
+            for face in EMBEDDED_FACES {
+                db.load_font_data(face.to_vec());
+            }
+            db.load_system_fonts();
+            db.set_sans_serif_family(EMBEDDED_FAMILY);
+            db.set_monospace_family(EMBEDDED_MONO_FAMILY);
+            db
+        })
+        .clone()
+}
+
+/// How many times this process has actually walked the filesystem for system
+/// fonts — incremented once, inside [`scanned_system_db`]'s `get_or_init`, no
+/// matter how many windows or `FontStore`s ask for one.
+///
+/// Exists for exactly one caller: a test that opens (constructs)
+/// [`FontStore::with_system_fallback`] more than once and asserts this stayed
+/// at 1 — the regression test for B12
+/// (`docs/release/BETA-RELEASE-CHECKLIST.md`). An application has no
+/// legitimate use for this number.
+static SYSTEM_FONT_SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// See [`SYSTEM_FONT_SCANS`]. `cfg(test)` rather than `pub`: nothing outside
+/// this crate's own test module has a legitimate reason to read it, unlike
+/// `vieww_platform_winit::native`'s equivalent counter for the Vulkan device,
+/// which an external integration test needs and so must be reachable from
+/// outside the crate.
+#[cfg(test)]
+pub(crate) fn system_font_scans() -> usize {
+    SYSTEM_FONT_SCANS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Loaded fonts, and the shaping engine that owns them.
 ///
 /// Wraps `cosmic-text`'s `FontSystem`. Held for the lifetime of an application
@@ -181,17 +259,8 @@ impl FontStore {
     /// should put in every binary — and `load` is how it adds one.
     #[must_use]
     pub fn with_system_fallback() -> Self {
-        let mut db = fontdb::Database::new();
-        // First, so a tie resolves to the deterministic face.
-        for face in EMBEDDED_FACES {
-            db.load_font_data(face.to_vec());
-        }
-        db.load_system_fonts();
-        db.set_sans_serif_family(EMBEDDED_FAMILY);
-        db.set_monospace_family(EMBEDDED_MONO_FAMILY);
-
         Self {
-            system: FontSystem::new_with_locale_and_db("en-US".to_owned(), db),
+            system: FontSystem::new_with_locale_and_db("en-US".to_owned(), scanned_system_db()),
             data: HashMap::new(),
             shapes: crate::shape_cache::ShapeCache::default(),
         }
@@ -811,6 +880,51 @@ mod fallback_tests {
         assert!(
             fallback.len() >= embedded.len(),
             "the fallback store must have at least the embedded faces"
+        );
+    }
+
+    /// B12: opening a second window must not re-walk the filesystem for
+    /// system fonts.
+    ///
+    /// `with_system_fallback` used to build a fresh `fontdb::Database` and
+    /// call `load_system_fonts()` — a synchronous scan of every font file on
+    /// disk — on every call, because every window called it once with no
+    /// caching between them (`vieww-platform-winit`'s `app.rs` calls it from
+    /// `FrameDriver::use_system_fonts` for each window it creates). Measured
+    /// at 46 seconds on a slow disk in
+    /// `docs/release/BETA-RELEASE-CHECKLIST.md`, and paid once per window —
+    /// three times over for a three-window desktop suite.
+    ///
+    /// This asserts the scan itself — [`system_font_scans`], incremented only
+    /// inside `scanned_system_db`'s `get_or_init` — happens at most once for
+    /// the whole test binary, no matter how many stores this test (or any
+    /// test before it in the same binary) constructs. "At most" rather than
+    /// "exactly", because tests share one process and another test may have
+    /// already paid for the first scan; what must never happen is a *second*
+    /// one caused by *this* test's three extra stores.
+    #[test]
+    fn opening_several_windows_scans_the_system_fonts_once() {
+        let _first = FontStore::with_system_fallback();
+        let after_first = system_font_scans();
+        assert!(
+            after_first >= 1,
+            "the very first call anywhere in this binary must have scanned \
+             at least once by now"
+        );
+
+        // Three more, standing in for three windows (or a window and two
+        // dialogs) opened in one process.
+        let _second = FontStore::with_system_fallback();
+        let _third = FontStore::with_system_fallback();
+        let _fourth = FontStore::with_system_fallback();
+
+        assert_eq!(
+            system_font_scans(),
+            after_first,
+            "building 3 more `FontStore`s scanned the filesystem {} more \
+             time(s) — B12 is back: every window is paying the system font \
+             scan again instead of reusing the first one",
+            system_font_scans() - after_first
         );
     }
 

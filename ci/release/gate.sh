@@ -163,9 +163,23 @@ pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
 		echo "gpu=$(system_profiler SPDisplaysDataType 2>/dev/null | sed -n 's/^ *Chipset Model: //p' | paste -sd ';' -)"
 		;;
 	windows)
-		echo "os_version=$(cmd.exe /c ver 2>/dev/null | tr -d '\r' | sed '/^$/d')"
-		echo "cpu=$(powershell.exe -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' 2>/dev/null | tr -d '\r')"
-		echo "gpu=$(powershell.exe -NoProfile -Command '(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + " (driver " + $_.DriverVersion + ")" }) -join "; "' 2>/dev/null | tr -d '\r')"
+		# **`//c`, not `/c`, and every one of these reads from `/dev/null`.**
+		#
+		# Git Bash rewrites an argument that starts with a single `/` into a
+		# Windows path before the program sees it: `cmd.exe /c ver` reaches
+		# `cmd` as `cmd.exe C:/ ver`, which is not "run `ver` and exit" — it is
+		# an interactive shell. It prints its banner and then waits for a
+		# command that is never coming. A GPU gate on a real laptop hung there
+		# for three hours, before its first row, with an empty `logs/` folder:
+		# the only output was `cmd`'s own copyright notice, which reads exactly
+		# like the `ver` output it was supposed to be.
+		#
+		# `//c` survives the rewrite as `/c`, and `</dev/null` means anything
+		# that still decides to read stdin gets an immediate EOF rather than
+		# stopping the release.
+		echo "os_version=$(cmd.exe //c ver </dev/null 2>/dev/null | tr -d '\r' | sed '/^$/d')"
+		echo "cpu=$(powershell.exe -NoProfile -Command '(Get-CimInstance Win32_Processor).Name' </dev/null 2>/dev/null | tr -d '\r')"
+		echo "gpu=$(powershell.exe -NoProfile -Command '(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + " (driver " + $_.DriverVersion + ")" }) -join "; "' </dev/null 2>/dev/null | tr -d '\r')"
 		;;
 	linux)
 		echo "os_version=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
@@ -272,7 +286,16 @@ fi # mode != gpu (Gate 0 rest, G1.1, G1.2)
 
 cert_env=()
 case "$mode" in
-cpu) cert_env=(VIEWW_CERT_NO_GPU=1) ;;
+# `VIEWW_TIMINGS_ADVISORY=1` is `test-animation-stress`'s own escape hatch
+# (see its `main.rs`) for exactly what this mode's own help text already
+# calls it: "CI, any machine". G1.8's budget is a claim about release-class
+# hardware (B7 in BETA-RELEASE-CHECKLIST.md); a `--mode cpu` runner is
+# whatever GitHub happened to schedule, so a miss here is measured and
+# recorded, not failed. `--mode gpu` is run deliberately on real hardware
+# somebody chose, which is the one measurement the budget is actually about
+# — so it does not get this, and a miss there is exactly what B7 asks
+# somebody to look at.
+cpu) cert_env=(VIEWW_CERT_NO_GPU=1 VIEWW_TIMINGS_ADVISORY=1) ;;
 gpu) cert_env=(VIEWW_CERT_REQUIRE_REAL_GPU=1 VIEWW_CERT_ONLY=gpu) ;;
 esac
 if [[ "$os" == windows ]]; then

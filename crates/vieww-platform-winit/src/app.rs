@@ -964,17 +964,25 @@ struct Gpu {
 impl Drop for Gpu {
     fn drop(&mut self) {
         self.surface.release(&self.renderer);
-        // **`VIEWW_KEEP_VULKAN=1` keeps the device and instance alive.** A
-        // diagnostic, not a setting: every window opens a `VkInstance` and a
-        // `VkDevice` of its own (`VulkanDevice::for_window`), so closing one
-        // window calls `vkDestroyInstance` while other windows' instances are
-        // still live — and NVIDIA's driver then jumps through a null pointer
-        // inside the *next* window's `vkDestroySwapchainKHR`. With this set
-        // nothing is ever destroyed: if the segfault goes away, the driver's
-        // per-process state is what the earlier teardown broke, and the fix is
-        // one shared instance and device for every window rather than one
-        // each. It leaks a device per window, so it is for one run of the
-        // desktop suite and nothing else.
+        // **`VIEWW_KEEP_VULKAN=1` keeps the device and instance alive.**
+        // Left over from diagnosing B11, not a setting anyone should reach
+        // for now: at the time this was added, every window opened a
+        // `VkInstance` and a `VkDevice` of its own (`VulkanDevice::for_window`),
+        // so closing one window called `vkDestroyInstance` while other
+        // windows' instances were still live — and NVIDIA's driver then
+        // jumped through a null pointer inside the *next* window's
+        // `vkDestroySwapchainKHR`. Setting this and watching the segfault
+        // disappear is what confirmed the driver's per-process state was
+        // what the earlier teardown broke, which is what motivated
+        // `crate::native::shared_device_for`: one `VulkanDevice` shared by
+        // every window in the process, not one each. That fix has since
+        // landed, so `renderer.device` here is already the process's one
+        // shared `Rc<VulkanDevice>` and this drop only ever releases *a*
+        // reference to it — the instance and device themselves outlive any
+        // single window's `Gpu` regardless of this flag. The env var is kept
+        // only because it is still the fastest way to rule the shared device
+        // back in as a suspect if a *new* teardown crash ever shows up: set
+        // it, and if the crash disappears, the regression is here again.
         if std::env::var_os("VIEWW_KEEP_VULKAN").is_none() {
             // SAFETY: the only place the renderer is dropped, and `Gpu` is
             // gone after this — nothing can reach the field again.
