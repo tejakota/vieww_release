@@ -28,11 +28,15 @@
 //!   each frame, so the whole buffer is still copied onto it. Narrowing that
 //!   needs `VK_KHR_incremental_present` and a per-image record of what each
 //!   already holds — see `present_damaged`'s own docs.
-//! - **No multi-window device sharing.** Every
-//!   [`NativeRenderer::for_window`] builds its own `VulkanDevice`; there is
-//!   no shared-instance equivalent to what `vieww_paint::gpu`'s `GpuContext`
-//!   used to give the vello path. One `vieww-hal` device per window is
-//!   correct, just not the cheapest shape — a follow-up, not a defect.
+//! - ~~No multi-window device sharing.~~ **Fixed.** [`shared_device_for`]
+//!   opens exactly one `VulkanDevice` per process (a `VkInstance` and a
+//!   `VkDevice`) and every window after the first asks it for a surface via
+//!   `VulkanDevice::swapchain_for_window` rather than building its own — see
+//!   that function's docs for why a `VulkanDevice` per window was a crash,
+//!   not a tidiness issue (B11 in `docs/release/BETA-RELEASE-CHECKLIST.md`).
+//!   What is **not** here yet is a test that opens two real windows and
+//!   asserts they share one device — see `tests/wait_loop.rs`'s
+//!   `two_windows_share_one_gpu_device` scenario.
 //! - **No GPU-accelerated rasterisation.** `vieww-hal`'s Vulkan device does
 //!   the *presentation* (upload + copy + present), not the drawing — the
 //!   scene is still rasterised entirely on the CPU. Spec §14.1's M2 onward
@@ -59,6 +63,7 @@
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vieww_foundation::Color;
 use vieww_hal::vulkan::{VulkanDevice, VulkanError, VulkanSwapchain};
@@ -140,6 +145,63 @@ thread_local! {
     static SHARED_DEVICE: RefCell<Option<Rc<VulkanDevice>>> = const { RefCell::new(None) };
 }
 
+/// How many real `VulkanDevice`s this process has opened — a `vkCreateInstance`
+/// and a `vkCreateDevice`, not a window that reused [`SHARED_DEVICE`].
+///
+/// Incremented at the only two places [`shared_device_for`] actually calls
+/// [`VulkanDevice::for_window`]. Exists so a test can prove a *second* window
+/// reused the shared device rather than merely observing that
+/// [`SHARED_DEVICE`] still holds something — see [`device_opens_this_process`]
+/// for why that distinction matters.
+static DEVICE_OPENS: AtomicUsize = AtomicUsize::new(0);
+
+/// How many real `VulkanDevice`s this process has opened so far. See
+/// [`DEVICE_OPENS`].
+///
+/// # Why this exists
+///
+/// [`shared_device_identity`] alone cannot tell a working cache from a broken
+/// one: [`SHARED_DEVICE`] is only ever *written* by the branch that runs when
+/// nothing is cached yet, so a regression that made every window call
+/// [`VulkanDevice::for_window`] again — ignoring the cache instead of reading
+/// it — would leave [`SHARED_DEVICE`] holding whatever the *first* window put
+/// there, unchanged, while the *second* window silently opened (and leaked,
+/// and would later double-free) a `VulkanDevice` of its own. That is exactly
+/// the shape B11 was
+/// (`docs/release/BETA-RELEASE-CHECKLIST.md`): every symptom was in what
+/// happened to the window that did **not** own the cache slot.
+///
+/// So the regression test for B11's architectural half
+/// (`tests/wait_loop.rs`'s `two_windows_share_one_gpu_device`) reads this
+/// before and after opening a second window and asserts it did not move, in
+/// addition to checking [`shared_device_identity`]. An application has no
+/// legitimate use for either number — this exists for that one test.
+#[doc(hidden)]
+#[must_use]
+pub fn device_opens_this_process() -> usize {
+    DEVICE_OPENS.load(Ordering::Relaxed)
+}
+
+/// The identity of the process-wide shared Vulkan device, if a window has
+/// opened one yet in this process.
+///
+/// An opaque, meaningless-outside-this-process number (the cached `Rc`'s
+/// address) — an application never has a legitimate reason to compare two
+/// devices' identity, and this is not for one. It exists for the same test
+/// [`device_opens_this_process`] does, and for the same reason: proving two
+/// windows share one `VulkanDevice` needs *something* to compare, and
+/// `vieww-hal`'s `VulkanDevice` has no `PartialEq` of its own (nor should it
+/// grow one just to be told apart in a test).
+#[doc(hidden)]
+#[must_use]
+pub fn shared_device_identity() -> Option<usize> {
+    SHARED_DEVICE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|device| Rc::as_ptr(device) as usize)
+    })
+}
+
 /// The shared device, and a swapchain for this window on it.
 ///
 /// **One driver per process, not one per window.** Opening a `VkInstance` and
@@ -171,10 +233,12 @@ fn shared_device_for(
             Err(error) => return Err(error.into()),
         }
         let (device, swapchain) = VulkanDevice::for_window(window, width, height)?;
+        DEVICE_OPENS.fetch_add(1, Ordering::Relaxed);
         return Ok((Rc::new(device), swapchain));
     }
 
     let (device, swapchain) = VulkanDevice::for_window(window, width, height)?;
+    DEVICE_OPENS.fetch_add(1, Ordering::Relaxed);
     let device = Rc::new(device);
     SHARED_DEVICE.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&device)));
     Ok((device, swapchain))

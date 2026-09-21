@@ -121,9 +121,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use vieww_foundation::task::FrameWaker;
-use vieww_foundation::Color;
-use vieww_platform_winit::App;
-use vieww_render::{WindowKey, Windows};
+use vieww_foundation::{Color, Size};
+use vieww_platform_winit::{native, App};
+use vieww_render::{WindowKey, WindowSpec, Windows, WindowsExt};
 use vieww_widget::prelude::*;
 
 /// How long an idle test sits still before deciding the loop is asleep.
@@ -566,13 +566,155 @@ fn an_application_can_close_its_own_window_and_still_gets_its_report() {
     pass("self-close");
 }
 
-// A former scenario here, `two_windows_share_one_gpu_device`, counted
-// `vieww_paint::gpu::GpuContext`'s shared-device bookkeeping across two
-// windows. That type is gone with vello — the new Vulkan backend
-// (`vieww_platform_winit::native`) builds every window its own
-// `vieww_hal::vulkan::VulkanDevice` with no shared-instance equivalent yet;
-// see that module's own doc comment. Re-add a scenario here once device
-// sharing exists to measure.
+/// Two windows share one Vulkan device.
+///
+/// # Why this is back, and why it was gone
+///
+/// A former version of this scenario counted `vieww_paint::gpu::GpuContext`'s
+/// shared-device bookkeeping and was deleted when the vello backend it
+/// measured was removed, with a note left here to re-add it "once device
+/// sharing exists to measure" in the new Vulkan backend. Device sharing then
+/// landed — [`vieww_platform_winit::native`]'s `shared_device_for` caches one
+/// `VulkanDevice` per process and hands every window after the first a
+/// surface on it via `VulkanDevice::swapchain_for_window` — without this file
+/// being told: the note stayed, describing an architecture the crate had
+/// already fixed, for long enough that a review reading it concluded the fix
+/// was still open. That is a worse failure than the missing scenario itself,
+/// and it is the reason this one asserts something rather than merely
+/// existing.
+///
+/// # What this closes
+///
+/// B11's crash (`docs/release/BETA-RELEASE-CHECKLIST.md`) had two halves:
+/// destroying a live window's device/instance in the wrong order (fixed by
+/// `Drop for Gpu` in `app.rs`, and not this scenario's concern), and every
+/// window opening its *own* `VkInstance`/`VkDevice` in the first place, so
+/// that closing any one of them tore down a driver the others were still
+/// using. Nothing before this scenario opened two windows in the same
+/// process and checked which of those two shapes actually happened — the
+/// unit tests around `WindowSet` cover the bookkeeping, and `self_close`
+/// above covers a *single* window's teardown order, but neither ever put a
+/// second `VulkanDevice` in the picture.
+///
+/// # Why two signals, not one
+///
+/// [`native::shared_device_identity`] alone would pass on a regression that
+/// made every window ignore the cache and open its own device again: nothing
+/// ever *writes* [`native`]'s shared-device slot except the branch that runs
+/// when it is empty, so it would still report the first window's identity,
+/// unchanged, while a second window silently leaked a device of its own
+/// beside it — which is exactly B11's shape, and exactly what an
+/// identity-only check would miss. [`native::device_opens_this_process`] is
+/// what actually says whether a *second* `VulkanDevice` was opened at all;
+/// see its own docs.
+fn two_windows_share_one_gpu_device() {
+    vieww_hardware::skip_without!(display, gpu);
+    arm_deadline("two_windows_share_one_gpu_device");
+
+    let app = App::new().title("vieww wait-loop: shared device");
+    let windows = app.windows();
+    let waker = app.waker();
+
+    // Driven by explicit wakes, not a frame count: `Still` settles into
+    // `ControlFlow::Wait` after its first frame, exactly like every other
+    // scenario in this file, so nothing here can wait for "the next frame" —
+    // there isn't one until something off-thread asks for it. Two stages,
+    // each announced by a wake, the same mechanism `a_waker_brings_a_sleeping_
+    // loop_back_and_it_settles_again` proves works: stage 1 opens the second
+    // window, stage 2 (a full `IDLE` later, plenty of wall-clock time for a
+    // swapchain that reuses an already-open device to appear) checks it.
+    let stage = Arc::new(AtomicU32::new(0));
+    std::thread::spawn({
+        let stage = Arc::clone(&stage);
+        let waker = waker.clone();
+        move || {
+            std::thread::sleep(IDLE);
+            stage.store(1, Ordering::SeqCst);
+            trace("stage 1: opening a second window");
+            waker.wake();
+
+            std::thread::sleep(IDLE);
+            stage.store(2, Ordering::SeqCst);
+            trace("stage 2: verifying");
+            waker.wake();
+        }
+    });
+
+    let baseline = Cell::new(None::<(usize, usize)>);
+    let opened = Cell::new(None::<WindowKey>);
+    let handled = Cell::new(0_u32);
+
+    let result = app
+        .on_frame(move |_log| {
+            // The primary window's device exists before its very first
+            // frame — `resumed` opens it — so the first call here already
+            // has something to record.
+            if baseline.get().is_none() {
+                let identity = native::shared_device_identity()
+                    .expect("the primary window must have opened a device by its first frame");
+                let opens = native::device_opens_this_process();
+                trace(&format!("baseline: device {identity:#x}, {opens} open(s)"));
+                baseline.set(Some((identity, opens)));
+            }
+
+            let current = stage.load(Ordering::SeqCst);
+
+            if current == 1 && handled.get() < 1 {
+                handled.set(1);
+                trace("opening a second window");
+                let key = windows
+                    .open(
+                        WindowSpec::new("vieww wait-loop: second window")
+                            .with_size(Size::new(320.0, 240.0)),
+                        |_key, driver| driver.set_root(Still),
+                    )
+                    .expect("a desktop application must be allowed a second window");
+                opened.set(Some(key));
+            }
+
+            if current == 2 && handled.get() < 2 {
+                handled.set(2);
+
+                let key = opened
+                    .get()
+                    .expect("stage 1 already opened a second window");
+                assert!(
+                    windows.is_open(key),
+                    "the second window never opened within {IDLE:?} of being \
+                     asked for — nothing about device sharing was tested"
+                );
+
+                let (identity_before, opens_before) = baseline
+                    .get()
+                    .expect("the first frame already recorded a baseline");
+                let identity_after = native::shared_device_identity()
+                    .expect("the shared device cannot vanish while two windows are open");
+                let opens_after = native::device_opens_this_process();
+                trace(&format!(
+                    "after: device {identity_after:#x}, {opens_after} open(s)"
+                ));
+
+                assert_eq!(
+                    identity_before, identity_after,
+                    "the process-wide shared device's identity changed after a \
+                     second window opened — see `native::shared_device_for`"
+                );
+                assert_eq!(
+                    opens_before, opens_after,
+                    "opening a second window opened {} additional VulkanDevice(s) \
+                     instead of reusing the process-wide one — this is B11's \
+                     architectural half regressing: a `VulkanDevice` per window is \
+                     what segfaulted on Mesa/Intel and NVIDIA the moment one window \
+                     closed (docs/release/BETA-RELEASE-CHECKLIST.md)",
+                    opens_after.saturating_sub(opens_before)
+                );
+                pass("two_windows_share_one_gpu_device");
+            }
+        })
+        .run(|driver| driver.set_root(Still));
+
+    panic!("the loop ended before both windows were measured: {result:?}");
+}
 
 /// The scenarios, by the name a child process is given.
 ///
@@ -593,6 +735,10 @@ const SCENARIOS: &[(&str, fn())] = &[
     (
         "self_close",
         an_application_can_close_its_own_window_and_still_gets_its_report,
+    ),
+    (
+        "shared_device",
+        two_windows_share_one_gpu_device,
     ),
 ];
 

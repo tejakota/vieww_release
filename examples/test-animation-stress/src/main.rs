@@ -188,7 +188,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let budget_only = failures.len() == over_budget_failures;
     if std::env::var_os("VIEWW_TIMINGS_ADVISORY").is_some() && budget_only {
         println!(
-            "ADVISORY: {} timing check(s) failed on a machine whose timings are              not evidence (VIEWW_TIMINGS_ADVISORY=1). The measurements are in              metrics.txt; certify the budget on release-class hardware.",
+            "ADVISORY: {} timing check(s) failed on a machine whose timings are not \
+             evidence (VIEWW_TIMINGS_ADVISORY=1). The measurements are in metrics.txt; \
+             certify the budget on release-class hardware.",
             failures.len()
         );
         return Ok(());

@@ -52,14 +52,43 @@ vieww_prune() {
 		case "$dir" in
 		"" | /* | *..*) continue ;;
 		esac
-		rm -rf "${root:?}/target/${dir:?}"
+		local path="${root:?}/target/${dir:?}"
+		[ -e "$path" ] || continue
+		# **`rmdir /s /q` on Windows.** `rm -rf` over a build tree from Git Bash
+		# unlinks each file through the MSYS layer one at a time; Windows' own
+		# recursive delete is the same work without that translation, and on a
+		# `target/` with a bundled toolchain in it the difference is minutes
+		# against hours. Falls back to `rm -rf` if `cmd` is not there.
+		if vieww_is_windows && command -v cmd >/dev/null 2>&1; then
+			cmd //c rmdir /s /q "$(cygpath -w "$path")" >/dev/null 2>&1 ||
+				rm -rf "$path"
+		else
+			rm -rf "$path"
+		fi
 	done
 }
 
 # vieww_disk ROOT — "target=<GB> free=<GB>", for logs.
+# **`du` is skipped on Windows, and that is not laziness.** `target/` after a
+# packaging run holds the bundled Rust toolchain — tens of thousands of small
+# files — and `du -sk` over it from Git Bash, with Defender reading every one,
+# takes longer than the stages it is annotating: a GPU gate on a real laptop sat
+# for three hours at this line, before its first row, with an empty logs/ folder
+# and nothing to say why. The number is a note in a log; the run is the point.
+# `VIEWW_DISK_USAGE=1` asks for it anyway.
 vieww_disk() {
 	local root="$1" used free
-	used=$(du -sk "$root/target" 2>/dev/null | awk '{printf "%.1f", $1 / 1048576}')
+	if [ "${VIEWW_DISK_USAGE:-0}" = 1 ] || ! vieww_is_windows; then
+		used=$(du -sk "$root/target" 2>/dev/null | awk '{printf "%.1f", $1 / 1048576}')
+	fi
 	free=$(df -Pk "$root" 2>/dev/null | awk 'NR==2 {printf "%.1f", $4 / 1048576}')
-	echo "target=${used:-0}GB free=${free:-?}GB"
+	echo "target=${used:-?}GB free=${free:-?}GB"
+}
+
+# Whether this shell is Git Bash/MSYS on Windows.
+vieww_is_windows() {
+	case "$(uname -s)" in
+	MINGW* | MSYS* | CYGWIN*) return 0 ;;
+	*) return 1 ;;
+	esac
 }
