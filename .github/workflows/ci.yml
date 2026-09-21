@@ -208,7 +208,7 @@ jobs:
                   "mode": "cpu",
                   "hosted": True,
                   "headless": True,
-                  "rows": "",
+                  "rows": "*",
               },
               # Apple's paravirtualized GPU through MoltenVK — the only test of
               # the Vulkan parity suite and census on that path. Its pixels are
@@ -220,7 +220,7 @@ jobs:
                   "mode": "gpu",
                   "hosted": True,
                   "headless": True,
-                  "rows": "",
+                  "rows": "*",
               },
               # The hosted Ubuntu image carries the Android SDK, NDK and JDK a
               # laptop may not, so the export route is proved here. G2.7-G2.11
