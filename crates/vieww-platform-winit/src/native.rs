@@ -28,15 +28,15 @@
 //!   each frame, so the whole buffer is still copied onto it. Narrowing that
 //!   needs `VK_KHR_incremental_present` and a per-image record of what each
 //!   already holds — see `present_damaged`'s own docs.
-//! - ~~No multi-window device sharing.~~ **Fixed.** [`shared_device_for`]
-//!   opens exactly one `VulkanDevice` per process (a `VkInstance` and a
-//!   `VkDevice`) and every window after the first asks it for a surface via
-//!   `VulkanDevice::swapchain_for_window` rather than building its own — see
-//!   that function's docs for why a `VulkanDevice` per window was a crash,
-//!   not a tidiness issue (B11 in `docs/release/BETA-RELEASE-CHECKLIST.md`).
-//!   What is **not** here yet is a test that opens two real windows and
-//!   asserts they share one device — see `tests/wait_loop.rs`'s
-//!   `two_windows_share_one_gpu_device` scenario.
+//! - ~~No multi-window device sharing.~~ **Fixed.** `shared_device_for`
+//!   (private to this module) opens exactly one `VulkanDevice` per process
+//!   (a `VkInstance` and a `VkDevice`), and every window after the first
+//!   asks it for a surface via `VulkanDevice::swapchain_for_window` rather
+//!   than building its own — see that function's docs for why a
+//!   `VulkanDevice` per window was a crash, not a tidiness issue (B11 in
+//!   `docs/release/BETA-RELEASE-CHECKLIST.md`). `tests/wait_loop.rs`'s
+//!   `two_windows_share_one_gpu_device` scenario opens two real windows and
+//!   asserts they share one device.
 //! - **No GPU-accelerated rasterisation.** `vieww-hal`'s Vulkan device does
 //!   the *presentation* (upload + copy + present), not the drawing — the
 //!   scene is still rasterised entirely on the CPU. Spec §14.1's M2 onward

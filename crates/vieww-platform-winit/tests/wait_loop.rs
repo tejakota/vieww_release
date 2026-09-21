@@ -700,7 +700,8 @@ fn two_windows_share_one_gpu_device() {
                      second window opened — see `native::shared_device_for`"
                 );
                 assert_eq!(
-                    opens_before, opens_after,
+                    opens_before,
+                    opens_after,
                     "opening a second window opened {} additional VulkanDevice(s) \
                      instead of reusing the process-wide one — this is B11's \
                      architectural half regressing: a `VulkanDevice` per window is \
@@ -736,10 +737,7 @@ const SCENARIOS: &[(&str, fn())] = &[
         "self_close",
         an_application_can_close_its_own_window_and_still_gets_its_report,
     ),
-    (
-        "shared_device",
-        two_windows_share_one_gpu_device,
-    ),
+    ("shared_device", two_windows_share_one_gpu_device),
 ];
 
 /// Parent: run each scenario in a child. Child: run the one it was named.
