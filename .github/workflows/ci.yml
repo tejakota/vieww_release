@@ -1,672 +1,494 @@
-name: ViewW CI
+# The beta release gate's hosted legs: Linux, Windows and macOS, on
+# GitHub-hosted runners -- every OS this project ships for gets a CPU pass on
+# every hosted run.
+#
+# GPU certification (G1.4, G1.5, G1.10, G1.14) still needs a real machine
+# (`ci/vieww gate --mode cpu`, then `--mode gpu` on `linux-cpu`/`linux-gpu`,
+# `windows-gpu`), because that is where a real GPU and display are. None of
+# the hosted runners has either (macOS's hosted `macos-gpu` leg is the one
+# exception: Apple's paravirtualized GPU through MoltenVK), so every other
+# hosted leg here is the CPU pass only: every build, test, suite, screenshot
+# and installer, with GPU execution and the real-window desktop suite recorded
+# as SKIPPED rather than pretended.
+#
+# **Every leg of the sign-off is in this file**, the Linux and Windows
+# self-hosted ones included, so the release gate is described in one place
+# rather than half here and half in somebody's shell history. The `plan` job at
+# the top decides which of them a given run executes, and prints why on the
+# summary page — see the comment above it. The short version:
+#
+#   push to main       hosted legs, each leg's outstanding rows only
+#   `v*` tag           hosted legs, the whole gate, every row
+#   Run workflow       `legs` picks the machines (hosted | all | none | a
+#                      comma list), `rerun` picks failed rows or everything
+#
+# A leg whose `rows` list is empty is skipped on a rerun: that is what keeps a
+# test push from repeating work that already passed.
+# It never runs on pull requests: this repository is public, and a pull request
+# from a fork must not get a multi-hour job, or any job with write access.
+#
+# Results:
+#   gate-<leg>                  run folders (CHECKLIST.md, logs, evidence)
+#   screenshots-<leg>           five feature and five studio pictures
+#   installers-windows-cpu/-macos-cpu/-linux-cpu-hosted   .msi/.zip, .dmg/.AppImage,
+#                               SHA256SUMS, MANIFEST.txt
+#   checklist-ci                both runs merged into one CHECKLIST-ci.md
+#                               (also shown on the run's summary page)
+#
+# Merge with the local (self-hosted, real-hardware) Linux runs:
+#   ci/vieww checklist target/release-gate/linux-cpu-* target/release-gate/linux-gpu-* \
+#       gate-linux-cpu-hosted/ gate-windows-cpu/ gate-macos-cpu/ gate-macos-gpu/ \
+#       gate-linux-export/ -o CHECKLIST.md
+
+name: release-gate
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-
-  pull_request:
-
   workflow_dispatch:
     inputs:
-      legs:
-        description: "CI legs to run"
-        required: false
-        default: "hosted"
-        type: choice
-        options:
-          - hosted
-          - all
-          - none
-
-      rerun:
-        description: "Rerun mode"
-        required: false
-        default: "all"
-        type: choice
-        options:
-          - all
-          - failed
-
       scope:
-        description: "CI scope"
-        required: false
-        default: "gate"
+        description: "gate = everything; checks = fmt/clippy/docs/tests only; screenshots = just the ten pictures (minutes, no gate)"
         type: choice
-        options:
-          - gate
-          - checks
-          - screenshots
-
+        options: [gate, checks, screenshots]
+        default: gate
+      rerun:
+        description: "failed = only the rows that failed last time (see RERUN LISTS below); all = full gate"
+        type: choice
+        options: [failed, all]
+        default: failed
       package:
-        description: "Build packages"
-        required: false
-        default: true
+        description: "Build installers"
         type: boolean
+        default: true
+      legs:
+        description: "Which machines: hosted (default) | all | none | a comma list of leg ids (see LEGS below), e.g. windows-cpu,macos-gpu"
+        type: string
+        default: ""
+  # A push to main reruns the failed-row lists below (the same as a manual run
+  # with rerun=failed); a `v*` tag runs the full gate. A newer push to the same
+  # ref cancels the run still in progress (see `concurrency`).
+  push:
+    branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: vieww-ci-${{ github.ref }}
+  group: release-gate-${{ github.ref }}
   cancel-in-progress: true
 
-
-# ============================================================================
-# VIEWW CI
-#
-# GitHub-hosted validation:
-#
-#   Linux CPU
-#   Windows CPU
-#   macOS CPU
-#   macOS GPU / graphics path
-#
-# Intentionally disabled:
-#
-#   Linux GPU
-#   Windows GPU
-#
-# Linux/Windows GPU certification is performed locally on real GPU hardware.
-# ============================================================================
-
-
 jobs:
-
-  # ==========================================================================
-  # PLAN
-  # ==========================================================================
-
+  # ── THE GATE AT THE TOP ─────────────────────────────────────────────────
+  #
+  # Every leg of the release sign-off is described below, the Linux ones
+  # included, so this file is the whole picture rather than the part that
+  # happens to run on GitHub's machines. What actually runs is decided here,
+  # once, and the reasons are printed on the run's summary page.
+  #
+  # Three questions, in order:
+  #
+  #  1. **Which machines?** `legs` — `hosted` (the default: GitHub's runners),
+  #     `all` (adds the self-hosted Linux and Windows legs), `none`, or a comma
+  #     list of leg ids. The self-hosted legs are never picked by default: with
+  #     no runner registered for those labels a job queues for six hours and
+  #     then fails, which is worse than not running it.
+  #  2. **Which rows?** `rerun` — `failed` uses each leg's `rows` list below,
+  #     `all` runs the whole gate. A `v*` tag always runs everything: a
+  #     certification with rows carried over from a previous commit is not a
+  #     certification.
+  #  3. **Is there anything left?** A leg whose `rows` list is empty has
+  #     nothing outstanding, so on `rerun: failed` it is skipped rather than
+  #     repeating work that already passed. **That is the dedupe**: as a row
+  #     starts passing, delete it from its leg's list; when the list is empty
+  #     the leg stops running during testing, and still runs in full for the
+  #     tag.
   plan:
-    name: Plan CI matrix
+    name: plan
     runs-on: ubuntu-latest
-
     outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
     steps:
-
-      - name: Generate CI matrix
-        id: matrix
+      - id: plan
         shell: bash
         env:
-          REQUESTED_LEGS: ${{ github.event_name == 'workflow_dispatch' && inputs.legs || 'hosted' }}
-          REQUESTED_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'gate' }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          LEGS: ${{ inputs.legs }}
+          RERUN: ${{ inputs.rerun }}
+          SCOPE_IN: ${{ inputs.scope }}
         run: |
-          python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import os
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
 
-          requested_legs = os.environ.get("REQUESTED_LEGS", "hosted")
-          requested_scope = os.environ.get("REQUESTED_SCOPE", "gate")
-
-          legs = [
-
-              # ============================================================
-              # LINUX CPU
-              # ============================================================
-
+          # ── LEGS ────────────────────────────────────────────────────────
+          # One entry per machine the sign-off needs.
+          #
+          #   hosted     false = a self-hosted runner with these labels, so it
+          #              is opt-in (`legs: all`, or named).
+          #   headless   true  = no display and no GPU: the desktop suite and
+          #              the GPU stages record SKIPPED rather than pretending.
+          #   rows       what `rerun: failed` executes. "" = nothing
+          #              outstanding, so the leg is skipped on a rerun.
+          #              "*" = this leg has never passed anything; run it whole.
+          LEGS = [
+              # Linux, on the machine with a real GPU and a real display. The
+              # only leg that can answer G1.4, G1.5, G1.10 and G1.14 with
+              # hardware rather than a skip.
               {
                   "id": "linux-cpu",
                   "os": "linux",
-                  "runner": "ubuntu-latest",
+                  "runner": ["self-hosted", "linux", "vieww-gate"],
                   "mode": "cpu",
-                  "gpu": False,
-                  "hosted": True,
-                  "headless": True,
-                  "disabled": False,
-                  "export": True,
+                  "hosted": False,
+                  "headless": False,
+                  "rows": "G0.5,G1.1,G1.3,G3.1",
               },
-
-              # ============================================================
-              # LINUX GPU
-              #
-              # Disabled in GitHub CI.
-              # Run locally on real Linux GPU hardware.
-              # ============================================================
-
               {
                   "id": "linux-gpu",
                   "os": "linux",
-                  "runner": "local-linux-gpu",
+                  "runner": ["self-hosted", "linux", "vieww-gate", "gpu"],
                   "mode": "gpu",
-                  "gpu": True,
                   "hosted": False,
                   "headless": False,
-                  "disabled": True,
-                  "export": False,
                   "vk_device": "nvidia",
+                  "rows": "*",
               },
-
-              # ============================================================
-              # WINDOWS CPU
-              # ============================================================
-
+              # GitHub-hosted Ubuntu: the same CPU pass windows-cpu and
+              # macos-cpu already get, so every OS in the matrix runs the
+              # gate on every hosted push, not just Windows and macOS. This
+              # image has no Vulkan ICD and no display, so every gpu/* stage
+              # and the real-window desktop suite (G1.10) record SKIPPED via
+              # certify.sh's own no-ICD/no-display detection -- nothing here
+              # certifies G1.4, G1.5, G1.10 or G1.14; that stays linux-cpu /
+              # linux-gpu on real hardware, above. No build-time system
+              # packages are needed for this: winit resolves libxkbcommon,
+              # libwayland-client and libX11 via dlopen (xkbcommon-dl,
+              # wayland-sys) and ash loads libvulkan the same way
+              # (ash::Entry::load), so nothing here links against them.
+              # New leg, no run history yet: rows: "*" runs it whole until
+              # the owner narrows this down to what's actually outstanding.
+              {
+                  "id": "linux-cpu-hosted",
+                  "os": "linux",
+                  "runner": "ubuntu-latest",
+                  "mode": "cpu",
+                  "hosted": True,
+                  "headless": True,
+                  "rows": "*",
+              },
+              # Outstanding as of the 2026-09-18 run: the studio's tests
+              # spawning `/bin/sh` (G1.1, and G1.3 through the same suite) and
+              # the MSI (G3.1, with G8.1 behind it). Everything else on this
+              # machine has passed.
               {
                   "id": "windows-cpu",
                   "os": "windows",
                   "runner": "windows-latest",
                   "mode": "cpu",
-                  "gpu": False,
                   "hosted": True,
                   "headless": True,
-                  "disabled": False,
-                  "export": True,
+                  "rows": "G1.1,G1.3,G3.1",
               },
-
-              # ============================================================
-              # WINDOWS GPU
-              #
-              # Disabled in GitHub CI.
-              # Run locally on real Windows GPU hardware.
-              # ============================================================
-
+              # Windows on real hardware: D3D12 and the desktop suite, which
+              # the hosted image cannot run. Opt-in like the Linux legs.
               {
                   "id": "windows-gpu",
                   "os": "windows",
-                  "runner": "local-windows-gpu",
+                  "runner": ["self-hosted", "windows", "vieww-gate", "gpu"],
                   "mode": "gpu",
-                  "gpu": True,
                   "hosted": False,
                   "headless": False,
-                  "disabled": True,
-                  "export": False,
-                  "vk_device": "d3d12",
+                  "rows": "*",
               },
-
-              # ============================================================
-              # macOS CPU
-              # ============================================================
-
               {
                   "id": "macos-cpu",
                   "os": "macos",
                   "runner": "macos-latest",
                   "mode": "cpu",
-                  "gpu": False,
                   "hosted": True,
                   "headless": True,
-                  "disabled": False,
-                  "export": True,
+                  "rows": "",
               },
-
-              # ============================================================
-              # macOS GPU / GRAPHICS
-              #
-              # This is NOT a larger GPU runner.
-              # It runs on GitHub-hosted macOS hardware.
-              # ============================================================
-
+              # Apple's paravirtualized GPU through MoltenVK — the only test of
+              # the Vulkan parity suite and census on that path. Its pixels are
+              # evidence; its timings are not.
               {
                   "id": "macos-gpu",
                   "os": "macos",
                   "runner": "macos-latest",
                   "mode": "gpu",
-                  "gpu": True,
                   "hosted": True,
-                  "headless": False,
-                  "disabled": False,
-                  "export": False,
+                  "headless": True,
+                  "rows": "",
+              },
+              # The hosted Ubuntu image carries the Android SDK, NDK and JDK a
+              # laptop may not, so the export route is proved here. G2.7-G2.11
+              # passed on 2026-09-18, so the list is empty and reruns skip it;
+              # `rerun: all` and the tag still run it, and `full_rows` is what
+              # it runs then.
+              {
+                  "id": "linux-export",
+                  "os": "linux",
+                  "runner": "ubuntu-latest",
+                  "mode": "cpu",
+                  "hosted": True,
+                  "headless": True,
+                  "export_only": True,
+                  "rows": "",
+                  "full_rows": "G2.7,G2.8,G2.9,G2.10,G2.11",
               },
           ]
 
-          # ----------------------------------------------------------------
-          # Select requested legs
-          # ----------------------------------------------------------------
+          event = os.environ["EVENT"]
+          ref = os.environ["REF"]
+          tag = ref.startswith("refs/tags/")
+          wanted = (os.environ.get("LEGS") or "").strip().lower()
+          rerun = (os.environ.get("RERUN") or "").strip() or ("failed" if event == "push" and not tag else "all")
+          # A tag is the certification: everything, on every machine that is
+          # available, whatever the lists say.
+          if tag:
+              rerun = "all"
 
-          selected = []
+          if not wanted:
+              wanted = "hosted"
 
-          for leg in legs:
+          # `scope: screenshots` takes ten pictures and runs no gate row at
+          # all — minutes rather than hours, for the question "does this
+          # machine draw the product correctly", which is what sent somebody
+          # looking at a macOS build with no text on its buttons. Only the CPU
+          # legs draw them (a GPU leg's pictures would be the same ones), so
+          # the rest are not started.
+          scope = (os.environ.get("SCOPE_IN") or "").strip() or "gate"
+          if os.environ["EVENT"] == "push":
+              scope = "gate"
 
-              if leg.get("disabled", False):
+          chosen, skipped = [], []
+          for leg in LEGS:
+              if scope == "screenshots" and (leg["mode"] != "cpu" or leg.get("export_only")):
+                  skipped.append((leg["id"], "draws no screenshots"))
                   continue
-
-              if requested_scope == "screenshots":
-                  if leg["mode"] != "cpu":
-                      continue
-
-              if requested_legs == "none":
+              if wanted == "none":
+                  skipped.append((leg["id"], "legs: none"))
                   continue
-
-              if requested_legs == "hosted":
-                  if not leg["hosted"]:
+              if wanted == "hosted" and not leg["hosted"]:
+                  skipped.append((leg["id"], "self-hosted; pass legs: all or name it"))
+                  continue
+              if wanted not in ("hosted", "all"):
+                  named = [x.strip() for x in wanted.split(",") if x.strip()]
+                  if leg["id"] not in named:
+                      skipped.append((leg["id"], "not named in legs"))
                       continue
 
-              if requested_legs == "all":
-                  if not leg["hosted"]:
+              rows = leg.get("rows", "*")
+              only = ""
+              if scope == "screenshots":
+                  chosen.append({**leg, "only": "", "export_only": False,
+                                 "vk_device": "", "headless": "1" if leg.get("headless") else ""})
+                  continue
+              # An outstanding list is also what a leg runs on a rerun, so
+              # `linux-cpu`'s list below is this laptop's, not a CI machine's.
+              if rerun == "failed":
+                  if rows == "":
+                      skipped.append((leg["id"], "nothing outstanding (rows is empty)"))
                       continue
+                  if rows != "*":
+                      only = rows
+              # An export-only leg never runs anything but its own rows, even
+              # in a full run: the rest of the gate is another leg's job, and a
+              # full pass here would build the whole workspace twice.
+              if leg.get("export_only"):
+                  rows_full = leg.get("full_rows") or leg.get("rows")
+                  if rows_full not in ("", "*"):
+                      only = rows_full
 
-              selected.append(leg)
+              entry = dict(leg)
+              entry["only"] = only
+              entry["export_only"] = bool(leg.get("export_only"))
+              entry["vk_device"] = leg.get("vk_device", "")
+              entry["headless"] = "1" if leg.get("headless") else ""
+              chosen.append(entry)
 
-          # ----------------------------------------------------------------
-          # Avoid an empty matrix.
-          # ----------------------------------------------------------------
-
-          if not selected:
-              selected = [
-                  {
-                      "id": "noop",
-                      "os": "linux",
-                      "runner": "ubuntu-latest",
-                      "mode": "cpu",
-                      "gpu": False,
-                      "hosted": True,
-                      "headless": True,
-                      "disabled": False,
-                      "export": False,
-                      "noop": True,
-                  }
-              ]
-
-          matrix = {
-              "include": selected
-          }
-
+          matrix = {"include": chosen}
           print("matrix=" + json.dumps(matrix))
+          print("any=" + ("true" if chosen else "false"))
+
+          summary = ["## Plan", "",
+                     f"event `{event}`, ref `{ref}`, scope `{scope}`, legs `{wanted}`, rerun `{rerun}`", ""]
+          for leg in chosen:
+              rows = leg["only"] or ("screenshots only" if scope == "screenshots" else "the whole gate")
+              summary.append(f"- **{leg['id']}** — {rows}")
+          for name, why in skipped:
+              summary.append(f"- ~~{name}~~ — {why}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("\n".join(summary) + "\n")
           PY
-
-
-  # ==========================================================================
-  # MAIN VIEWW GATE
-  # ==========================================================================
+          echo "planned:"; cat "$GITHUB_OUTPUT"
 
   gate:
-    name: ${{ matrix.id }}
-
-    needs:
-      - plan
-
+    name: gate (${{ matrix.id }})
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-
     runs-on: ${{ matrix.runner }}
-
+    # Hosted jobs are cut off at 6 hours.
     timeout-minutes: 350
-
     defaults:
       run:
         shell: bash
-
     env:
       CARGO_TERM_COLOR: always
-
-      SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || 'gate' }}
-
-      PACKAGE: >-
-        ${{
-          github.event_name != 'workflow_dispatch' ||
-          inputs.package == true
-          && 'true' || 'false'
-        }}
-
-      VIEWW_CERT_NO_DESKTOP: ${{ matrix.headless && '1' || '' }}
-
-      VIEWW_VK_DEVICE: ${{ matrix.vk_device || '' }}
-
-      VIEWW_TIMINGS_ADVISORY: ""
-
-
+      # A hosted runner has no display and no GPU; a self-hosted one has both,
+      # and `plan` says which this is. Empty rather than "0" so
+      # `${VIEWW_CERT_NO_DESKTOP:-0}` reads it as unset.
+      VIEWW_CERT_NO_DESKTOP: ${{ matrix.headless }}
+      # Which adapter the GPU pass uses, when the leg names one.
+      VIEWW_VK_DEVICE: ${{ matrix.vk_device }}
+      # **Frame budgets are measured here and judged elsewhere.** A hosted
+      # runner is a shared virtual machine, and the checklist already says to
+      # treat its timings as indicative — so the animation-stress budget is
+      # recorded rather than enforced on these machines, and enforced on the
+      # self-hosted ones, which are real hardware. A stuttering animation still
+      # fails everywhere; that is a picture, not a clock.
+      VIEWW_TIMINGS_ADVISORY: ${{ matrix.hosted && '1' || '' }}
+      # Throwaway machines: let the export suite add the Android/iOS/Windows
+      # rustup targets (for this repo's toolchain and the scaffold's `stable`).
+      # Never on a self-hosted machine, where the toolchains are the owner's.
+      VIEWW_EXPORT_INSTALL_TARGETS: ${{ matrix.hosted && '1' || '' }}
+      SCOPE: ${{ github.event_name == 'push' && 'gate' || inputs.scope }}
+      PACKAGE: ${{ matrix.mode == 'cpu' && !matrix.export_only && (github.event_name == 'push' && 'true' || inputs.package) || 'false' }}
+      # Decided in `plan` — empty means the whole gate.
+      ONLY: ${{ matrix.only }}
     steps:
-
-      # ======================================================================
-      # CHECKOUT
-      # ======================================================================
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
+      - name: Make disk space
+        if: matrix.hosted
+        run: bash ci/tools/ci-runner-prep.sh
 
-      # ======================================================================
-      # HOST INFORMATION
-      # ======================================================================
-
-      - name: Host information
-        shell: bash
+      - name: Rust toolchain (from rust-toolchain.toml)
+        if: matrix.hosted
         run: |
-          echo "=============================================="
-          echo "ViewW CI"
-          echo "=============================================="
-
-          echo "Leg       : ${{ matrix.id }}"
-          echo "OS        : ${{ matrix.os }}"
-          echo "Mode      : ${{ matrix.mode }}"
-          echo "GPU       : ${{ matrix.gpu }}"
-          echo "Runner    : ${{ matrix.runner }}"
-          echo "Headless  : ${{ matrix.headless }}"
-          echo "Scope     : ${SCOPE}"
-          echo "Package   : ${PACKAGE}"
-
-          echo
-          echo "System:"
-          uname -a || true
-
-          echo
-          echo "Architecture:"
-          uname -m || true
-
-          echo
-          echo "Rust:"
-          rustc --version || true
-
-          echo
-          echo "Cargo:"
-          cargo --version || true
-
-          echo
-          echo "Disk:"
-          df -h || true
-
-
-      # ======================================================================
-      # LINUX DEPENDENCIES
-      # ======================================================================
-
-      - name: Install Linux dependencies
-        if: matrix.os == 'linux'
-        shell: bash
-        run: |
-          set -eux
-
-          sudo apt-get update
-
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libx11-dev \
-            libxi-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libegl1-mesa-dev \
-            libgl1-mesa-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libudev-dev \
-            python3 \
-            python3-pip \
-            vulkan-tools \
-            vulkan-validationlayers
-
-          echo
-          echo "Vulkan:"
-          vulkaninfo --summary || true
-
-
-      # ======================================================================
-      # WINDOWS INFORMATION
-      # ======================================================================
-
-      - name: Windows environment
-        if: matrix.os == 'windows'
-        shell: bash
-        run: |
-          set -eux
-
-          cmd.exe /c ver || true
-
-          echo
-          echo "PowerShell:"
-          pwsh -NoProfile -Command '$PSVersionTable'
-
-          echo
-          echo "Graphics adapters:"
-          pwsh -NoProfile -Command \
-            "Get-CimInstance Win32_VideoController |
-             Select-Object Name,DriverVersion"
-
-
-      # ======================================================================
-      # macOS INFORMATION
-      # ======================================================================
-
-      - name: macOS environment
-        if: matrix.os == 'macos'
-        shell: bash
-        run: |
-          set -eux
-
-          sw_vers
-
-          echo
-          echo "Hardware:"
-          system_profiler SPHardwareDataType
-
-          echo
-          echo "Graphics:"
-          system_profiler SPDisplaysDataType
-
-
-      # ======================================================================
-      # macOS GRAPHICS / VULKAN
-      # ======================================================================
-
-      - name: macOS graphics environment
-        if: matrix.os == 'macos' && matrix.gpu
-        shell: bash
-        run: |
-          set -eux
-
-          if command -v brew >/dev/null 2>&1; then
-            brew install molten-vk vulkan-loader vulkan-tools || true
-          fi
-
-          echo
-          echo "Vulkan:"
-          vulkaninfo --summary || true
-
-
-      # ======================================================================
-      # GPU INFORMATION
-      # ======================================================================
-
-      - name: GPU environment
-        if: matrix.gpu
-        shell: bash
-        run: |
-          echo "=============================================="
-          echo "GPU / GRAPHICS ENVIRONMENT"
-          echo "=============================================="
-
-          if command -v nvidia-smi >/dev/null 2>&1; then
-            nvidia-smi
-          fi
-
-          if command -v vulkaninfo >/dev/null 2>&1; then
-            echo
-            vulkaninfo --summary || true
-          fi
-
-
-      # ======================================================================
-      # RUST TOOLCHAIN
-      # ======================================================================
-
-      - name: Install Rust toolchain
-        shell: bash
-        run: |
-          set -eux
-
-          rustup toolchain install
-
-          rustup component add rustfmt
-          rustup component add clippy
-          rustup component add llvm-tools-preview
-
+          rustup toolchain install   # reads rust-toolchain.toml (channel + components)
           rustc --version
           cargo --version
 
+      - name: cargo-deny
+        if: matrix.hosted && env.SCOPE != 'screenshots'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
 
-      # ======================================================================
-      # CARGO DENY
-      # ======================================================================
-
-      - name: Install cargo-deny
-        shell: bash
+      - name: WiX (Windows installer)
+        if: matrix.os == 'windows' && env.PACKAGE == 'true' && env.SCOPE != 'screenshots'
+        # v5: the last major without a EULA acceptance step; package.sh needs
+        # only `wix build` and the <Files> element (v5+).
         run: |
-          set -eux
-
-          if ! command -v cargo-deny >/dev/null 2>&1; then
-            cargo install cargo-deny --locked
-          fi
-
-          cargo deny --version
-
-
-      # ======================================================================
-      # WINDOWS WIX
-      # ======================================================================
-
-      - name: Install WiX
-        if: matrix.os == 'windows' && matrix.mode == 'cpu'
-        shell: bash
-        run: |
-          set -eux
-
-          dotnet tool install --global wix --version 5.0.2 || \
-            dotnet tool update --global wix --version 5.0.2
-
+          dotnet tool install --global wix --version 5.0.2
           echo "$USERPROFILE/.dotnet/tools" >> "$GITHUB_PATH"
 
-          wix --version
+      - name: appimagetool (Linux installer)
+        if: matrix.os == 'linux' && matrix.hosted && env.PACKAGE == 'true' && env.SCOPE != 'screenshots' && !matrix.export_only
+        # package.sh's own comment on make_appimage already says this: "downloaded
+        # by CI; see APPIMAGETOOL" -- and on this leg it is not optional.
+        # ci/release/artifacts.sh (G3.1) calls package.sh with its default args,
+        # which are `--installers`; under `--installers`, package.sh's own doc
+        # comment is explicit that a missing tool "is an error", and
+        # make_appimage's code does exactly that (`exit 1`) when appimagetool is
+        # missing and `require_installers` is set. Skip this step and G3.1 hard
+        # fails on this leg, it does not quietly ship without the .AppImage.
+        # `--appimage-extract-and-run` (no FUSE on a CI container) is already
+        # package.sh's own concern, not this step's.
+        run: |
+          curl -fsSL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
 
-
-      # ======================================================================
-      # JAVA
-      # ======================================================================
-
-      - name: Setup Java
-        if: matrix.export
+      # ── Studio export route (G2.7-G2.11) ─────────────────────────────────
+      # The Android SDK and NDK come with every hosted image (ci-runner-prep.sh
+      # keeps them); these add what the images lack or version loosely.
+      - name: JDK 17 (Android Gradle Plugin 8)
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-
-      # ======================================================================
-      # GRADLE
-      # ======================================================================
-
-      - name: Setup Gradle
-        if: matrix.export
+      - name: Gradle 8.9 (a scaffolded project has no wrapper JAR)
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-
-      # ======================================================================
-      # CARGO NDK
-      # ======================================================================
-
-      - name: Install cargo-ndk
-        if: matrix.export
+      - name: cargo-ndk
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-ndk
 
-
-      # ======================================================================
-      # ANDROID ENVIRONMENT
-      # ======================================================================
+      - name: MinGW-w64 (Windows .exe cross-build from Linux)
+        if: matrix.mode == 'cpu' && matrix.os == 'linux' && matrix.hosted && env.SCOPE != 'screenshots'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-mingw-w64-x86-64
 
       - name: Android environment
-        if: matrix.export
-        shell: bash
+        if: matrix.mode == 'cpu' && matrix.hosted && env.SCOPE != 'screenshots'
         run: |
-          set -eux
+          # The newest NDK the image has; cargo-ndk and Studio both read
+          # ANDROID_NDK_HOME, which some images point at an older one.
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-}}"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" >> "$GITHUB_ENV"
+          echo "NDK: $ndk"; echo "SDK: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
-          echo "ANDROID_HOME=${ANDROID_HOME:-}"
-          echo "ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-}"
-          echo "ANDROID_NDK_LATEST_HOME=${ANDROID_NDK_LATEST_HOME:-}"
+      - name: Vulkan loader + MoltenVK (macOS; stages skip if no device)
+        if: matrix.os == 'macos' && matrix.hosted && env.SCOPE != 'screenshots'
+        run: brew install molten-vk vulkan-loader vulkan-tools || true
 
-
-      # ======================================================================
-      # COMPLETE VIEWW GATE
-      # ======================================================================
-
-      - name: Run complete ViewW gate
-        if: env.SCOPE == 'gate' && !matrix.noop
-        shell: bash
+      - name: Release gate
+        if: env.SCOPE == 'gate'
         run: |
-          set -euo pipefail
-
-          mkdir -p "target/release-gate/${{ matrix.id }}"
-
-          args=(
-            --mode "${{ matrix.mode }}"
-            --out "target/release-gate/${{ matrix.id }}"
-          )
-
-          if [[ "${PACKAGE}" != "true" ]]; then
-            args+=(--skip-package)
+          args=(--mode "${{ matrix.mode }}" --out "target/release-gate/${{ matrix.id }}")
+          [[ "$PACKAGE" == true ]] || args+=(--skip-package)
+          if [[ -n "$ONLY" ]]; then
+            echo "rerunning only: $ONLY"
+            args+=(--only "$ONLY")
+            [[ ",$ONLY," == *",G3.1,"* ]] || args+=(--skip-package)
           fi
-
-          echo "=============================================="
-          echo "VIEWW RELEASE GATE"
-          echo "=============================================="
-          echo "Platform : ${{ matrix.os }}"
-          echo "Mode     : ${{ matrix.mode }}"
-          echo "GPU      : ${{ matrix.gpu }}"
-          echo "Package  : ${PACKAGE}"
-          echo "=============================================="
-
           bash ci/vieww gate "${args[@]}"
 
-
-      # ======================================================================
-      # CHECKS MODE
-      # ======================================================================
-
-      - name: Run ViewW checks
-        if: env.SCOPE == 'checks' && matrix.mode == 'cpu' && !matrix.noop
-        shell: bash
+      # The failures and the end of each one's log, on the run's summary page and
+      # in the job log — readable without downloading anything.
+      - name: Failures with logs
+        if: always() && env.SCOPE == 'gate'
         run: |
-          set -eux
+          run="target/release-gate/${{ matrix.id }}"
+          [[ -f "$run/rows.tsv" ]] || { echo "no run folder"; exit 0; }
+          py=$(command -v python3 || command -v python)
+          "$py" ci/release/report-failures.py "$run" -o "$run/FAILURES.md"
+          cat "$run/FAILURES.md"
+          {
+            echo "# ${{ matrix.id }}"
+            cat "$run/FAILURES.md"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          bash ci/vieww checks
-
-
-      # ======================================================================
-      # SCREENSHOTS
-      # ======================================================================
-
-      - name: Generate screenshots
-        if: |
-          always() &&
-          !matrix.noop &&
-          (
-            env.SCOPE == 'gate' ||
-            env.SCOPE == 'screenshots'
-          ) &&
-          matrix.mode == 'cpu'
-        shell: bash
+      # ── Ten pictures a person looks at (5 features + 5 studio) ───────────
+      # Not a gate row and it fails nothing: `docs/RELEASE-CHECK.md`'s last
+      # step is a person skimming the screenshots on each OS for missing
+      # glyphs, clipped panels and wrong colours, and that person needs the
+      # pictures attached to the run rather than buried in a gate folder they
+      # have to download. Skipped on the GPU jobs (the CPU job on the same OS
+      # draws the same pictures) and on the export-only job.
+      - name: Screenshots
+        if: always() && (env.SCOPE == 'gate' || env.SCOPE == 'screenshots') && matrix.mode == 'cpu' && !matrix.export_only
         continue-on-error: true
-        run: |
-          bash ci/tools/screenshots.sh \
-            "target/screenshots/${{ matrix.id }}"
-
-
-      # ======================================================================
-      # UPLOAD SCREENSHOTS
-      # ======================================================================
+        run: bash ci/tools/screenshots.sh "target/screenshots/${{ matrix.id }}"
 
       - name: Upload screenshots
-        if: |
-          always() &&
-          !matrix.noop &&
-          (
-            env.SCOPE == 'gate' ||
-            env.SCOPE == 'screenshots'
-          ) &&
-          matrix.mode == 'cpu'
+        if: always() && (env.SCOPE == 'gate' || env.SCOPE == 'screenshots') && matrix.mode == 'cpu' && !matrix.export_only
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-${{ matrix.id }}
@@ -674,45 +496,12 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Checks only
+        if: env.SCOPE == 'checks' && matrix.mode == 'cpu'
+        run: bash ci/vieww checks
 
-      # ======================================================================
-      # FAILURE REPORT
-      # ======================================================================
-
-      - name: Generate failure report
-        if: always() && env.SCOPE == 'gate' && !matrix.noop
-        shell: bash
-        run: |
-          set +e
-
-          run="target/release-gate/${{ matrix.id }}"
-
-          if [[ ! -f "$run/rows.tsv" ]]; then
-            echo "No rows.tsv found."
-            exit 0
-          fi
-
-          python3 \
-            ci/release/report-failures.py \
-            "$run" \
-            -o "$run/FAILURES.md" || true
-
-          if [[ -f "$run/FAILURES.md" ]]; then
-            cat "$run/FAILURES.md"
-
-            {
-              echo "# ${{ matrix.id }}"
-              cat "$run/FAILURES.md"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-
-      # ======================================================================
-      # UPLOAD GATE EVIDENCE
-      # ======================================================================
-
-      - name: Upload gate evidence
-        if: always() && env.SCOPE == 'gate' && !matrix.noop
+      - name: Upload run folder
+        if: always() && env.SCOPE == 'gate'
         uses: actions/upload-artifact@v4
         with:
           name: gate-${{ matrix.id }}
@@ -721,18 +510,8 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-
-      # ======================================================================
-      # UPLOAD INSTALLERS
-      # ======================================================================
-
       - name: Upload installers
-        if: |
-          always() &&
-          env.SCOPE == 'gate' &&
-          env.PACKAGE == 'true' &&
-          matrix.mode == 'cpu' &&
-          !matrix.noop
+        if: always() && env.SCOPE == 'gate' && env.PACKAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: installers-${{ matrix.id }}
@@ -743,116 +522,42 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
-
-  # ==========================================================================
-  # MERGED CHECKLIST
-  # ==========================================================================
-
   checklist:
-    name: Build merged release checklist
-
-    needs:
-      - gate
-
-    if: always()
-
+    name: merged checklist
+    needs: gate
+    if: always() && (github.event_name == 'push' || inputs.scope == 'gate')
     runs-on: ubuntu-latest
-
     steps:
-
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
-
-
-      - name: Download gate evidence
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           pattern: gate-*
           path: runs
-          merge-multiple: false
-
-
-      - name: Build merged checklist
-        shell: bash
+      - name: Fill the checklist from both runs
         run: |
-          set -e
-
+          shopt -s nullglob
+          dirs=(runs/gate-*)
+          if ((${#dirs[@]} == 0)); then echo "no run folders to merge"; exit 0; fi
+          python3 ci/release/fill-checklist.py "${dirs[@]}" -o CHECKLIST-ci.md || true
+          python3 ci/release/report-failures.py "${dirs[@]}" -o FAILURES.md
+          # Failures first: they are what a person opens this for.
+          cat FAILURES.md >> "$GITHUB_STEP_SUMMARY"
+          { echo; cat FAILURES.md; } >> CHECKLIST-ci.md
+          # Every log of every run, without the images, in the same artifact as
+          # the checklist (the one that is easy to find and download).
           mkdir -p logs
-
-          echo "=============================================="
-          echo "VIEWW RELEASE CHECKLIST"
-          echo "=============================================="
-
-          python3 \
-            ci/release/fill-checklist.py \
-            runs \
-            -o CHECKLIST-ci.md || true
-
-          python3 \
-            ci/release/report-failures.py \
-            runs \
-            -o FAILURES.md || true
-
-          echo
-          echo "----------------------------------------------"
-          echo "CHECKLIST"
-          echo "----------------------------------------------"
-
-          cat CHECKLIST-ci.md || true
-
-          echo
-          echo "----------------------------------------------"
-          echo "FAILURES"
-          echo "----------------------------------------------"
-
-          cat FAILURES.md || true
-
-          {
-            echo "# ViewW CI Release Checklist"
-            echo
-            cat CHECKLIST-ci.md || true
-            echo
-            echo "# Failures"
-            cat FAILURES.md || true
-          } >> "$GITHUB_STEP_SUMMARY"
-
-
-      # ======================================================================
-      # UPLOAD CHECKLIST
-      # ======================================================================
-
-      - name: Upload release checklist
-        uses: actions/upload-artifact@v4
+          for d in "${dirs[@]}"; do
+            name=$(basename "$d")
+            (cd "$d" && find . \( -name '*.txt' -o -name '*.tsv' -o -name '*.json' -o -name '*.md' -o -name '*.log' \) -print) |
+              while read -r f; do mkdir -p "logs/$name/$(dirname "$f")"; cp "$d/$f" "logs/$name/$f"; done
+          done
+      - uses: actions/upload-artifact@v4
         with:
-          name: vieww-release-checklist
+          name: checklist-ci
           path: |
             CHECKLIST-ci.md
             FAILURES.md
             logs/
-          retention-days: 30
           if-no-files-found: warn
-
-
-      # ======================================================================
-      # SUMMARY
-      # ======================================================================
-
-      - name: CI matrix summary
-        shell: bash
-        run: |
-          {
-            echo
-            echo "## ViewW CI Matrix"
-            echo
-            echo "| Platform | CPU | GPU |"
-            echo "|---|---:|---:|"
-            echo "| Linux | ✅ GitHub-hosted | ⏸️ Local |"
-            echo "| Windows | ✅ GitHub-hosted | ⏸️ Local |"
-            echo "| macOS | ✅ GitHub-hosted | ✅ GitHub-hosted |"
-            echo
-            echo "Linux GPU and Windows GPU are intentionally excluded from GitHub CI."
-            echo "Run those two certifications locally before release sign-off."
-          } >> "$GITHUB_STEP_SUMMARY"
